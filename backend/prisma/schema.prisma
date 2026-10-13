@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://postgres:admin123@localhost:5434/mapa_eleitoral?schema=public"
+}
+
+// ==========================================
+// MÓDULO DE AUTENTICAÇÃO E ADMINISTRAÇÃO
+// ==========================================
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  ANALYST
+  ADMIN
+}
+
+// ==========================================
+// MÓDULO DE METADADOS E AUDITORIA (ETL)
+// ==========================================
+model ImportJob {
+  id               String    @id @default(uuid())
+  dataset          String    
+  source           String    
+  status           JobStatus @default(RUNNING)
+  startedAt        DateTime  @default(now()) @map("started_at")
+  finishedAt       DateTime? @map("finished_at")
+  recordsFound     Int       @default(0) @map("records_found")
+  recordsInserted  Int       @default(0) @map("records_inserted")
+  recordsUpdated   Int       @default(0) @map("records_updated")
+  recordsRejected  Int       @default(0) @map("records_rejected")
+  errors           Json?     
+  
+  @@map("import_jobs")
+}
+
+enum JobStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+// ==========================================
+// MÓDULO TERRITORIAL (Esqueleto inicial)
+// ==========================================
+model State {
+  id             Int            @id
+  uf             String         @unique @db.VarChar(2)
+  name           String
+  municipalities Municipality[]
+  candidates     Candidate[]    // <--- ADICIONAR ESTA LINHA
+
+  @@map("states")
+}
+
+model Municipality {
+  id          String   @id @default(uuid())
+  ibgeCode    String   @unique @map("ibge_code") @db.VarChar(7)
+  name        String
+  stateId     Int      @map("state_id")
+  state       State    @relation(fields: [stateId], references: [id])
+  latitude    Float?
+  longitude   Float?
+  
+  geometry    Unsupported("geometry(MultiPolygon, 4326)")? 
+
+  importedAt  DateTime @default(now()) @map("imported_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  source      String   @default("IBGE")
+
+  results     ElectoralResult[] 
+  amendments  Amendment[]       // <--- ADICIONE ESTA LINHA AQUI
+  leaderships  Leadership[]
+  @@map("municipalities")
+}
+
+model Leadership {
+  id           String       @id @default(uuid())
+  name         String
+  role         String       // Ex: Vereador, Ex-Prefeito, Liderança Religiosa, Presidente de Partido
+  party        String?      // Ex: PL, PSD, Republicanos
+  phone        String?
+  alignment    String       // ALTO, MEDIO, EM CONQUISTA
+  notes        String?
+  municipalityId String
+  municipality   Municipality @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+// ==========================================
+// MÓDULO TSE: ELEIÇÕES E PARTIDOS
+// ==========================================
+model Election {
+  id    Int    @id @default(autoincrement())
+  year  Int
+  round Int    @default(1)
+  
+  results ElectoralResult[]
+
+  @@unique([year, round])
+  @@map("elections")
+}
+
+model Party {
+  id     Int    @id @default(autoincrement())
+  number Int    @unique
+  acronym String @db.VarChar(10)
+  name   String
+
+  candidates Candidate[]
+
+  @@map("parties")
+}
+
+// ==========================================
+// MÓDULO TSE: CANDIDATOS E RESULTADOS
+// ==========================================
+model Candidate {
+  id             String  @id @default(uuid())
+  tseId          String? @unique @map("tse_id") // ID oficial do TSE
+  name           String
+  urnName        String  @map("urn_name")
+  office         String  // Ex: "Deputado Federal", "Deputado Estadual"
+  
+  partyId        Int     @map("party_id")
+  party          Party   @relation(fields: [partyId], references: [id])
+  
+  stateId        Int     @map("state_id") // SP = 35
+  state          State   @relation(fields: [stateId], references: [id])
+
+  results        ElectoralResult[]
+
+  @@map("candidates")
+}
+
+model ElectoralResult {
+  id             String  @id @default(uuid())
+  
+  candidateId    String  @map("candidate_id")
+  candidate      Candidate @relation(fields: [candidateId], references: [id])
+  
+  electionId     Int     @map("election_id")
+  election       Election @relation(fields: [electionId], references: [id])
+  
+  municipalityId String  @map("municipality_id")
+  municipality   Municipality @relation(fields: [municipalityId], references: [id])
+
+  votes          Int
+  percentage     Float?  // Percentual de votos válidos
+  position       Int?    // Ficou em 1º? 2º? no município
+  
+  @@unique([candidateId, electionId, municipalityId]) // Impede duplicidade do mesmo candidato na mesma cidade e ano
+  @@map("electoral_results")
+}
+
+model Amendment {
+  id             Int          @id @default(autoincrement())
+  categoryId     String       // Saúde, Esporte, Assistência Social, etc.
+  amount         Float        // Valor da emenda
+  municipalityId String       // <-- ALTERADO DE Int PARA String
+  municipality   Municipality @relation(fields: [municipalityId], references: [id])
+}
