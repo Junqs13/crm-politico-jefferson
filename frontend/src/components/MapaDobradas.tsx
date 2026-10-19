@@ -40,33 +40,52 @@ export function MapaDobradas() {
 
   useEffect(() => {
     getDobradas(anoSelecionado)
-      .then((res: any) => setDados(res))
-      .catch((err: any) => console.error(err));
+      .then((res: MunicipioDado[]) => {
+        if (Array.isArray(res)) {
+          setDados(res);
+          // Atualiza a cidade em destaque se já houver uma selecionada
+          if (cidadeDestaque) {
+            const atualizada = res.find((c) => c.id === cidadeDestaque.id);
+            if (atualizada) setCidadeDestaque(atualizada);
+          }
+        }
+      })
+      .catch((err: any) => console.error('Erro ao buscar dobradas:', err));
 
-    axios.get('https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-35-mun.json')
-      .then((res: any) => setGeoJsonData(res.data))
-      .catch((err: any) => console.error("Erro ao carregar GeoJSON", err));
+    if (!geoJsonData) {
+      axios
+        .get('https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-35-mun.json')
+        .then((res: any) => setGeoJsonData(res.data))
+        .catch((err: any) => console.error('Erro ao carregar GeoJSON', err));
+    }
   }, [anoSelecionado]);
 
   const normalizar = (texto: string) => {
     if (!texto) return '';
-    return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+    return texto
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .trim();
   };
+
+  const formatCurrency = (val: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 
   const exportarFichaPDF = () => {
     if (!cidadeDestaque) return;
     const pdf = new jsPDF('p', 'mm', 'a4');
-    
-    const corPrimaria = [15, 23, 42]; 
-    const corDestaque = [59, 130, 246]; 
-    const corAmarelo = [250, 204, 21]; 
-    const corCinzaFundo = [241, 245, 249]; 
+
+    const corPrimaria = [15, 23, 42];
+    const corDestaque = [59, 130, 246];
+    const corAmarelo = [250, 204, 21];
+    const corCinzaFundo = [241, 245, 249];
 
     pdf.setFillColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
     pdf.rect(0, 0, 210, 35, 'F');
 
     pdf.setTextColor(255, 255, 255);
-    pdf.setFont("helvetica", "bold");
+    pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(16);
     pdf.text(`EXTRATO POLÍTICO MUNICIPAL - JEFFERSON CAMPOS`, 14, 15);
     pdf.setFontSize(12);
@@ -86,7 +105,7 @@ export function MapaDobradas() {
     pdf.text(`EMENDAS DESTINADAS`, 144, y + 6);
 
     pdf.setFontSize(12);
-    pdf.setFont("helvetica", "bold");
+    pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(corDestaque[0], corDestaque[1], corDestaque[2]);
     pdf.text(`${cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos`, 18, y + 16);
     pdf.setTextColor(22, 163, 74);
@@ -96,7 +115,7 @@ export function MapaDobradas() {
 
     y += 32;
     pdf.setFontSize(13);
-    pdf.setFont("helvetica", "bold");
+    pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
     pdf.text(`Distribuição de Emendas por Área`, 14, y);
 
@@ -104,58 +123,66 @@ export function MapaDobradas() {
     const emendasObj = Object.entries(cidadeDestaque.emendas);
     if (emendasObj.length === 0) {
       pdf.setFontSize(10);
-      pdf.setFont("helvetica", "normal");
+      pdf.setFont('helvetica', 'normal');
       pdf.setTextColor(120, 120, 120);
       pdf.text(`Sem registo de emendas para este município.`, 14, y + 6);
       y += 10;
     } else {
-      emendasObj.sort((a: any, b: any) => b[1] - a[1]).forEach(([cat, val]) => {
-        const valorNum = val as number;
-        const percent = (valorNum / (cidadeDestaque.totalEmendas || 1));
-        
-        pdf.setFontSize(10);
-        pdf.setFont("helvetica", "bold");
-        pdf.setTextColor(50, 50, 50);
-        pdf.text(`${cat.toUpperCase()}: ${formatCurrency(valorNum)}`, 14, y + 6);
+      emendasObj
+        .sort((a: any, b: any) => b[1] - a[1])
+        .forEach(([cat, val]) => {
+          const valorNum = val as number;
+          const percent = valorNum / (cidadeDestaque.totalEmendas || 1);
 
-        pdf.setFillColor(226, 232, 240);
-        pdf.roundedRect(110, y + 2, 86, 4, 1, 1, 'F');
-        pdf.setFillColor(corDestaque[0], corDestaque[1], corDestaque[2]);
-        pdf.roundedRect(110, y + 2, Math.max(4, 86 * percent), 4, 1, 1, 'F');
+          pdf.setFontSize(10);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setTextColor(50, 50, 50);
+          pdf.text(`${cat.toUpperCase()}: ${formatCurrency(valorNum)}`, 14, y + 6);
 
-        y += 10;
-      });
+          pdf.setFillColor(226, 232, 240);
+          pdf.roundedRect(110, y + 2, 86, 4, 1, 1, 'F');
+          pdf.setFillColor(corDestaque[0], corDestaque[1], corDestaque[2]);
+          pdf.roundedRect(110, y + 2, Math.max(4, 86 * percent), 4, 1, 1, 'F');
+
+          y += 10;
+        });
     }
 
     y += 10;
     pdf.setFontSize(13);
-    pdf.setFont("helvetica", "bold");
+    pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
     pdf.text(`Evolução Histórica por Candidato`, 14, y);
 
     y += 6;
     if (cidadeDestaque.historicoCandidatos) {
       Object.entries(cidadeDestaque.historicoCandidatos).forEach(([candName, anosVotos]) => {
-        if (y > 270) { pdf.addPage(); y = 20; }
+        if (y > 270) {
+          pdf.addPage();
+          y = 20;
+        }
 
         pdf.setFontSize(10);
-        pdf.setFont("helvetica", "bold");
+        pdf.setFont('helvetica', 'bold');
         pdf.setTextColor(corDestaque[0], corDestaque[1], corDestaque[2]);
         pdf.text(`${candName}`, 14, y + 5);
         y += 7;
 
-        pdf.setFont("helvetica", "normal");
+        pdf.setFont('helvetica', 'normal');
         let xOffset = 14;
-        anosDisponiveis.forEach(ano => {
+        anosDisponiveis.forEach((ano) => {
           const v = anosVotos[ano];
           if (v !== undefined && v > 0) {
-            if (xOffset > 170) { xOffset = 14; y += 7; }
+            if (xOffset > 170) {
+              xOffset = 14;
+              y += 7;
+            }
             pdf.setFillColor(241, 245, 249);
             pdf.roundedRect(xOffset, y, 26, 10, 2, 2, 'F');
             pdf.setFontSize(8);
             pdf.setTextColor(100, 100, 100);
             pdf.text(`${ano}`, xOffset + 2, y + 4);
-            pdf.setFont("helvetica", "bold");
+            pdf.setFont('helvetica', 'bold');
             pdf.setFontSize(9);
             pdf.setTextColor(15, 23, 42);
             pdf.text(`${v.toLocaleString('pt-BR')}`, xOffset + 2, y + 8.5);
@@ -173,19 +200,19 @@ export function MapaDobradas() {
     if (!cidadeDestaque) return;
     const texto = encodeURIComponent(
       `📊 *Dossiê Político - ${cidadeDestaque.municipio} (SP)*\n\n` +
-      `👤 *Jefferson Campos (${anoSelecionado})*: ${cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos\n` +
-      `📋 *Eleitores (Zonas)*: ${cidadeDestaque.eleitorado.totalEleitores.toLocaleString('pt-BR')} (Penetração: ${cidadeDestaque.eleitorado.penetracao})\n` +
-      `💰 *Total de Emendas*: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cidadeDestaque.totalEmendas)}\n\n` +
-      `_Relatório gerado pelo CRM & BI Político._`
+        `👤 *Jefferson Campos (${anoSelecionado})*: ${cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos\n` +
+        `📋 *Eleitores (Zonas)*: ${cidadeDestaque.eleitorado.totalEleitores.toLocaleString('pt-BR')} (Penetração: ${cidadeDestaque.eleitorado.penetracao})\n` +
+        `💰 *Total de Emendas*: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cidadeDestaque.totalEmendas)}\n\n` +
+        `_Relatório gerado pelo CRM & BI Político._`
     );
     window.open(`https://api.whatsapp.com/send?text=${texto}`, '_blank');
   };
 
   const mapStyle = (feature: any) => {
     const nomeFeature = normalizar(feature.properties.name);
-    const dadosCidade = dados.find(d => normalizar(d.municipio) === nomeFeature);
+    const dadosCidade = dados.find((d) => normalizar(d.municipio) === nomeFeature);
     let fillColor = '#334155';
-    
+
     if (dadosCidade && dadosCidade.votosJefferson > 0) {
       const v = dadosCidade.votosJefferson;
       if (v > 20000) fillColor = '#1e3a8a';
@@ -195,14 +222,14 @@ export function MapaDobradas() {
     }
 
     const isSelecionada = cidadeDestaque && normalizar(cidadeDestaque.municipio) === nomeFeature;
-    return { 
-      fillColor, weight: isSelecionada ? 3 : 1, opacity: 1, 
-      color: isSelecionada ? '#facc15' : '#1e293b', fillOpacity: 0.8 
+    return {
+      fillColor,
+      weight: isSelecionada ? 3 : 1,
+      opacity: 1,
+      color: isSelecionada ? '#facc15' : '#1e293b',
+      fillOpacity: 0.8,
     };
   };
-
-  const formatCurrency = (val: number) => 
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', height: 'calc(100vh - 60px)', width: '100vw', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc', overflow: 'hidden' }}>
@@ -212,17 +239,25 @@ export function MapaDobradas() {
         <div style={{ padding: '16px', backgroundColor: '#0f172a' }}>
           <h2 style={{ margin: 0, fontSize: '16px', color: '#facc15' }}>Mapa Eleitoral - SP</h2>
         </div>
-        
+
         <div style={{ padding: '12px', borderBottom: '1px solid #334155' }}>
           <p style={{ margin: '0 0 6px 0', fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Ciclo Eleitoral Base</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-            {anosDisponiveis.map(ano => (
-              <button key={ano} onClick={() => setAnoSelecionado(ano)}
+            {anosDisponiveis.map((ano) => (
+              <button
+                key={ano}
+                onClick={() => setAnoSelecionado(ano)}
                 style={{
-                  padding: '5px 8px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '11px',
+                  padding: '5px 8px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '11px',
                   backgroundColor: anoSelecionado === ano ? '#facc15' : '#334155',
-                  color: anoSelecionado === ano ? '#0f172a' : '#cbd5e1'
-                }}>
+                  color: anoSelecionado === ano ? '#0f172a' : '#cbd5e1',
+                }}
+              >
                 {ano}
               </button>
             ))}
@@ -230,25 +265,37 @@ export function MapaDobradas() {
         </div>
 
         <div style={{ padding: '12px' }}>
-          <input type="text" placeholder="🔍 Pesquisar município..." 
-            value={pesquisa} onChange={(e) => setPesquisa(e.target.value)}
+          <input
+            type="text"
+            placeholder="🔍 Pesquisar município..."
+            value={pesquisa}
+            onChange={(e) => setPesquisa(e.target.value)}
             style={{ width: '100%', padding: '10px', borderRadius: '6px', border: 'none', backgroundColor: '#334155', color: 'white', outline: 'none', fontSize: '13px', boxSizing: 'border-box' }}
           />
         </div>
 
         <div style={{ padding: '0 12px', overflowY: 'auto', flex: 1 }}>
-          {dados.filter(c => c.municipio.toLowerCase().includes(pesquisa.toLowerCase()))
+          {dados
+            .filter((c) => c.municipio.toLowerCase().includes(pesquisa.toLowerCase()))
             .sort((a, b) => b.votosJefferson - a.votosJefferson)
-            .map(c => (
-            <div key={c.id} onClick={() => setCidadeDestaque(c)}
-              style={{ 
-                marginBottom: '6px', padding: '10px', borderRadius: '6px', cursor: 'pointer',
-                backgroundColor: cidadeDestaque?.id === c.id ? '#3b82f6' : '#334155',
-              }}>
-              <strong style={{ fontSize: '13px', display: 'block' }}>{c.municipio}</strong>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>Jefferson Campos: {c.votosJefferson.toLocaleString('pt-BR')} v.</span>
-            </div>
-          ))}
+            .map((c) => (
+              <div
+                key={c.id}
+                onClick={() => setCidadeDestaque(c)}
+                style={{
+                  marginBottom: '6px',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  backgroundColor: cidadeDestaque?.id === c.id ? '#3b82f6' : '#334155',
+                }}
+              >
+                <strong style={{ fontSize: '13px', display: 'block' }}>{c.municipio}</strong>
+                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                  Jefferson Campos: {c.votosJefferson.toLocaleString('pt-BR')} v.
+                </span>
+              </div>
+            ))}
         </div>
       </div>
 
@@ -266,22 +313,18 @@ export function MapaDobradas() {
 
         {cidadeDestaque && (
           <div style={{ position: 'absolute', top: '15px', right: '15px', width: 'clamp(300px, 35vw, 450px)', zIndex: 2000, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)', borderRadius: '12px', overflow: 'hidden', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
-            
-            {/* CONTAINER DA FICHA */}
             <div ref={fichaRef} style={{ backgroundColor: '#0f172a', padding: '20px', color: '#f8fafc', overflowY: 'auto', flex: 1 }}>
               <p style={{ margin: '0 0 4px 0', fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>VISÃO Político Municipal</p>
               <h1 style={{ margin: '0 0 12px 0', fontSize: '24px', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 {cidadeDestaque.municipio} <span style={{ fontSize: '11px', backgroundColor: '#facc15', color: '#0f172a', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>SP</span>
               </h1>
-              
-              {/* VOTOS DO ANO SELECIONADO */}
+
               <div style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #334155' }}>
                 <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Votação em {anoSelecionado}</span>
                 <h2 style={{ margin: '4px 0 0 0', fontSize: '22px', color: '#60a5fa' }}>{cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos</h2>
               </div>
 
-              {/* ELEITORADO E PENETRAÇÃO (CLICÁVEL PARA ZONAS) */}
-              <div 
+              <div
                 onClick={() => setModalZonasAberto(true)}
                 style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px', cursor: 'pointer', border: '1px solid #334155' }}
                 title="Clique para ver o detalhamento por zona eleitoral"
@@ -298,51 +341,51 @@ export function MapaDobradas() {
                 </div>
               </div>
 
-              {/* EMENDAS */}
               <div style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
                 <h3 style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#facc15' }}>Total de Emendas Destinadas</h3>
                 <p style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(cidadeDestaque.totalEmendas)}</p>
                 <p style={{ margin: '3px 0 10px 0', fontSize: '10px', color: '#94a3b8' }}>{cidadeDestaque.totalDestinacoes} destinações em {Object.keys(cidadeDestaque.emendas).length} áreas.</p>
-                
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {Object.entries(cidadeDestaque.emendas).sort((a,b) => b[1] - a[1]).map(([cat, val]) => (
-                    <div key={cat}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
-                        <span>{cat}</span>
-                        <strong style={{ color: '#facc15' }}>{formatCurrency(val as number)}</strong>
+                  {Object.entries(cidadeDestaque.emendas)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([cat, val]) => (
+                      <div key={cat}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
+                          <span>{cat}</span>
+                          <strong style={{ color: '#facc15' }}>{formatCurrency(val as number)}</strong>
+                        </div>
+                        <div style={{ width: '100%', height: '3px', backgroundColor: '#334155', borderRadius: '2px' }}>
+                          <div style={{ width: `${((val as number) / (cidadeDestaque.totalEmendas || 1)) * 100}%`, height: '100%', backgroundColor: '#facc15' }}></div>
+                        </div>
                       </div>
-                      <div style={{ width: '100%', height: '3px', backgroundColor: '#334155', borderRadius: '2px' }}>
-                        <div style={{ width: `${((val as number) / (cidadeDestaque.totalEmendas || 1)) * 100}%`, height: '100%', backgroundColor: '#facc15' }}></div>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
 
-              {/* HISTÓRICO DE CANDIDATOS */}
               <div style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px' }}>
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#60a5fa' }}>Histórico por Candidato e Ano</h3>
-                
-                {cidadeDestaque.historicoCandidatos && Object.entries(cidadeDestaque.historicoCandidatos).map(([candName, anosVotos]) => (
-                  <div key={candName} style={{ marginBottom: '10px', borderBottom: '1px solid #334155', paddingBottom: '6px' }}>
-                    <strong style={{ fontSize: '11px', color: '#facc15', display: 'block', marginBottom: '3px' }}>{candName}</strong>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {anosDisponiveis.map(ano => {
-                        const v = anosVotos[ano];
-                        if (v === undefined || v === 0) return null;
-                        return (
-                          <div key={ano} style={{ backgroundColor: '#0f172a', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>
-                            <span style={{ color: '#94a3b8' }}>{ano}:</span> <strong style={{ color: '#60a5fa' }}>{v.toLocaleString('pt-BR')}</strong>
-                          </div>
-                        );
-                      })}
+
+                {cidadeDestaque.historicoCandidatos &&
+                  Object.entries(cidadeDestaque.historicoCandidatos).map(([candName, anosVotos]) => (
+                    <div key={candName} style={{ marginBottom: '10px', borderBottom: '1px solid #334155', paddingBottom: '6px' }}>
+                      <strong style={{ fontSize: '11px', color: '#facc15', display: 'block', marginBottom: '3px' }}>{candName}</strong>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {anosDisponiveis.map((ano) => {
+                          const v = anosVotos[ano];
+                          if (v === undefined || v === 0) return null;
+                          return (
+                            <div key={ano} style={{ backgroundColor: '#0f172a', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>
+                              <span style={{ color: '#94a3b8' }}>{ano}:</span> <strong style={{ color: '#60a5fa' }}>{v.toLocaleString('pt-BR')}</strong>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             </div>
 
-            {/* BOTÕES DE AÇÃO RESPONSIVOS */}
             <div style={{ padding: '10px', backgroundColor: '#1e293b', borderTop: '1px solid #334155', display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
               <button onClick={exportarFichaPDF} style={{ flex: 1, minWidth: '60px', padding: '8px 4px', border: 'none', backgroundColor: '#dc2626', color: 'white', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', textTransform: 'uppercase' }}>
                 📄 PDF
@@ -357,28 +400,27 @@ export function MapaDobradas() {
                 X
               </button>
             </div>
-
           </div>
         )}
 
         <MapContainer center={[-22.5, -48.5]} zoom={7} style={{ height: '100%', width: '100%', zIndex: 1, backgroundColor: '#0f172a' }}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
           {geoJsonData && (
-            <GeoJSON 
-              key={`${anoSelecionado}-${dados.length}`} 
-              data={geoJsonData} 
+            <GeoJSON
+              key={`${anoSelecionado}-${dados.length}`}
+              data={geoJsonData}
               style={mapStyle}
               onEachFeature={(feature, layer) => {
                 const nomeFeature = normalizar(feature.properties.name);
-                
-                layer.on({ 
+
+                layer.on({
                   click: (e) => {
                     L.DomEvent.stopPropagation(e);
-                    const dadosCidade = dados.find(d => normalizar(d.municipio) === nomeFeature);
+                    const dadosCidade = dados.find((d) => normalizar(d.municipio) === nomeFeature);
                     if (dadosCidade) {
                       setCidadeDestaque(dadosCidade);
                     }
-                  } 
+                  },
                 });
 
                 layer.bindTooltip(`<strong>${feature.properties.name}</strong>`, { sticky: true });
@@ -427,13 +469,12 @@ export function MapaDobradas() {
 
       {/* MODAL DE CRM DE LIDERANÇAS */}
       {crmAberto && cidadeDestaque && (
-        <PainelCRM 
-          municipioId={cidadeDestaque.id} 
-          municipioNome={cidadeDestaque.municipio} 
-          onClose={() => setCrmAberto(false)} 
+        <PainelCRM
+          municipioId={cidadeDestaque.id}
+          municipioNome={cidadeDestaque.municipio}
+          onClose={() => setCrmAberto(false)}
         />
       )}
-
     </div>
   );
 }

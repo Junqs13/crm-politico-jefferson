@@ -45,8 +45,8 @@ async function importToCloud() {
         await prisma.amendment.create({
           data: {
             municipalityId: em.municipalityId,
-            amount: em.amount,
-            // Mapeia para os campos reais suportados pelo seu schema se necessário
+            amount: Number(em.amount),
+            categoryId: String(em.categoryId ?? 'OUTROS'),
           }
         }).catch(() => {});
       }

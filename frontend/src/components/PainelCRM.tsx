@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useEffect, useCallback } from 'react';
+import { api } from '../services/api';
 
 interface Leadership {
   id: string;
@@ -20,19 +20,19 @@ export function PainelCRM({ municipioId, municipioNome, onClose }: { municipioId
   const [alinhamento, setAlinhamento] = useState('ALTO');
   const [notas, setNotas] = useState('');
 
-  const carregarLiderancas = () => {
-    axios.get(`http://localhost:3333/leaderships/${municipioId}`)
+  const carregarLiderancas = useCallback(() => {
+    api.get<Leadership[]>(`/leaderships/${municipioId}`)
       .then(res => setLiderancas(res.data))
       .catch(err => console.error(err));
-  };
+  }, [municipioId]);
 
   useEffect(() => {
     carregarLiderancas();
-  }, [municipioId]);
+  }, [carregarLiderancas]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    axios.post('http://localhost:3333/leaderships', {
+    api.post('/leaderships', {
       name: nome,
       role: cargo,
       party: partido,
@@ -50,7 +50,7 @@ export function PainelCRM({ municipioId, municipioNome, onClose }: { municipioId
   };
 
   const excluirLideranca = (id: string) => {
-    axios.delete(`http://localhost:3333/leaderships/${id}`)
+    api.delete(`/leaderships/${id}`)
       .then(() => carregarLiderancas())
       .catch(err => console.error(err));
   };

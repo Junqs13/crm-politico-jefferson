@@ -1,17 +1,29 @@
 import axios from 'axios';
 
 const getBaseUrl = () => {
+  let url = 'http://localhost:3333';
+
   if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-    return 'https://crm-politico-jefferson.onrender.com';
+    url = import.meta.env.VITE_API_URL || 'https://crm-politico-jefferson.onrender.com';
+  } else if (import.meta.env.VITE_API_URL) {
+    url = import.meta.env.VITE_API_URL;
   }
-  return import.meta.env.VITE_API_URL || 'http://localhost:3333';
+
+  // Remove barra no final, se houver
+  url = url.replace(/\/+$/, '');
+
+  // Garante que termina sempre com /api
+  if (!url.endsWith('/api')) {
+    url += '/api';
+  }
+
+  return url;
 };
 
 export const api = axios.create({
   baseURL: getBaseUrl(),
 });
 
-// Função essencial exigida pelo MapaDobradas e PainelBI
 export const getDobradas = async (ano: number | string) => {
   const response = await api.get(`/municipios/dobradas?ano=${ano}`);
   return response.data;

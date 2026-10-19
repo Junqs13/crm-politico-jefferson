@@ -7,18 +7,26 @@ const prisma = new PrismaClient();
 
 export class MunicipiosService {
   async obterMapaDobradas(ano: number) {
-    let eleitoresPorCidade: Record<string, number> = {};
-    let zonasPorCidade: Record<string, { zona: string; quantidade: string }[]> = {};
+    const eleitoresPorCidade: Record<string, number> = {};
+    const zonasPorCidade: Record<string, { zona: string; quantidade: string }[]> = {};
 
     try {
-      const csvPath = path.resolve(process.cwd(), 'quantidade_de_eleitores.csv');
-      if (fs.existsSync(csvPath)) {
+      // Tenta localizar o CSV em diferentes diretórios possíveis no ambiente local ou Render
+      const possiveisCaminhos = [
+        path.resolve(process.cwd(), 'quantidade_de_eleitores.csv'),
+        path.resolve(process.cwd(), '..', 'quantidade_de_eleitores.csv'),
+        path.resolve(process.cwd(), 'src', 'scripts', 'quantidade_de_eleitores.csv'),
+      ];
+
+      const csvPath = possiveisCaminhos.find((p) => fs.existsSync(p));
+
+      if (csvPath) {
         const fileContent = fs.readFileSync(csvPath, 'latin1');
         const parsed = Papa.parse(fileContent, { header: true, delimiter: ';' });
         parsed.data.forEach((row: any) => {
           const mun = row['Município']?.trim().toUpperCase();
           const zona = row['Zona']?.trim();
-          const qtdStr = row['Quantidade']?.toString().replace('.', '').replace(',', '.');
+          const qtdStr = row['Quantidade']?.toString().replace(/\./g, '').replace(',', '.');
           const qtd = parseFloat(qtdStr) || 0;
 
           if (mun) {
@@ -29,62 +37,69 @@ export class MunicipiosService {
             }
           }
         });
+      } else {
+        console.warn('⚠️ Arquivo quantidade_de_eleitores.csv não encontrado nos caminhos padrão.');
       }
     } catch (e) {
       console.error('Erro ao ler CSV de eleitores:', e);
     }
 
+    // Busca todos os municípios de SP sem depender exclusivamente de o ID ser 35 ou 1
     const municipios = await prisma.municipality.findMany({
-      where: { stateId: 35 },
       include: {
         results: {
-          include: { 
+          include: {
             candidate: true,
-            election: true 
-          }
+            election: true,
+          },
         },
-        amendments: true
-      }
+        amendments: true,
+      },
     });
 
-    return municipios.map(mun => {
-      const resultadoAno = mun.results.filter(r => r.election.year === ano);
-      const votosJefferson = resultadoAno.find(r => r.candidate.name === 'Jefferson Campos')?.votes || 0;
-      
+    return municipios.map((mun) => {
+      const resultadoAno = mun.results.filter((r) => r.election.year === ano);
+      const votosJefferson =
+        resultadoAno.find((r) => r.candidate.name.toUpperCase().includes('JEFFERSON CAMPOS'))?.votes || 0;
+
       const historicoJef: Record<number, number> = {};
       const historicoCandidatos: Record<string, Record<number, number>> = {};
 
-      mun.results.forEach(r => {
+      mun.results.forEach((r) => {
         const candName = r.candidate.name;
         const eleicaoAno = r.election.year;
-        
+
         if (!historicoCandidatos[candName]) {
           historicoCandidatos[candName] = {};
         }
         historicoCandidatos[candName][eleicaoAno] = r.votes;
 
-        if (candName === 'Jefferson Campos') {
+        if (candName.toUpperCase().includes('JEFFERSON CAMPOS')) {
           historicoJef[eleicaoAno] = r.votes;
         }
       });
 
       const emendas = mun.amendments.reduce((acc, curr) => {
-        const cat = curr.categoryId;
-        acc[cat] = (acc[cat] || 0) + curr.amount;
+        const cat = String(curr.categoryId);
+        acc[cat] = (acc[cat] || 0) + Number(curr.amount);
         return acc;
       }, {} as Record<string, number>);
 
-      const totalEmendas = mun.amendments.reduce((sum, curr) => sum + curr.amount, 0);
+      Object.keys(emendas).forEach((cat) => {
+        emendas[cat] = Math.round(emendas[cat] * 100) / 100;
+      });
 
-      const nomeLimpo = mun.name.toUpperCase();
+      const totalEmendas =
+        Math.round(mun.amendments.reduce((sum, curr) => sum + Number(curr.amount), 0) * 100) / 100;
+
+      const nomeLimpo = mun.name.trim().toUpperCase();
       const totalEleitores = eleitoresPorCidade[nomeLimpo] || 0;
       const penetracaoNum = totalEleitores > 0 ? (votosJefferson / totalEleitores) * 100 : 0;
       const penetracao = penetracaoNum.toFixed(2) + '%';
 
-      // Cálculo de Projeção / Meta para 2028 (Baseado em 2026 + crescimento estratégico de 20%)
       const votos2026 = historicoJef[2026] || votosJefferson;
-      const meta2028 = Math.round(votos2026 * 1.20); // Meta de crescimento de 20% sobre 2026
-      const potencialRestante = Math.max(0, Math.round(totalEleitores * 0.15) - votos2026); // Meta de atingir 15% do eleitorado
+      const meta2028 = Math.round(votos2026 * 1.2);
+      const potencialRestante = Math.max(0, Math.round(totalEleitores * 0.15) - votos2026);
 
       return {
         id: mun.id,
@@ -99,13 +114,18 @@ export class MunicipiosService {
         eleitorado: {
           totalEleitores,
           penetracao,
-          zonas: zonasPorCidade[nomeLimpo] || []
+          zonas: zonasPorCidade[nomeLimpo] || [],
         },
         projecao2028: {
           metaVotos: meta2028,
           potencialCrescimento: potencialRestante,
-          prioridadeCampanha: penetracaoNum < 2 && totalEleitores > 20000 ? 'ALTA OPORTUNIDADE' : penetracaoNum >= 5 ? 'REDUTO CONSOLIDADO' : 'MANUTENÇÃO'
-        }
+          prioridadeCampanha:
+            penetracaoNum < 2 && totalEleitores > 20000
+              ? 'ALTA OPORTUNIDADE'
+              : penetracaoNum >= 5
+              ? 'REDUTO CONSOLIDADO'
+              : 'MANUTENÇÃO',
+        },
       };
     });
   }
