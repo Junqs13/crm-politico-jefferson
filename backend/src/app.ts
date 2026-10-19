@@ -3,7 +3,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import municipiosRoutes from './modules/municipios/municipios.routes.js';
-import { LeadershipsService } from './modules/leaderships/leaderships.service.js';
+import { LeadershipsService, limparDados, validar, type DadosLideranca } from './modules/leaderships/leaderships.service.js';
 
 const app = express();
 const leadershipsService = new LeadershipsService();
@@ -50,11 +50,39 @@ const listarLiderancas = async (req: Request, res: Response) => {
 
 const criarLideranca = async (req: Request, res: Response) => {
   try {
-    const nova = await leadershipsService.criar(req.body);
+    const dados = limparDados(req.body);
+    const erro = validar(dados);
+    if (erro) {
+      res.status(400).json({ error: erro });
+      return;
+    }
+    const nova = await leadershipsService.criar(dados as DadosLideranca);
     res.status(201).json(nova);
   } catch (error) {
     console.error('Erro ao criar liderança:', error);
     res.status(500).json({ error: 'Erro ao criar liderança' });
+  }
+};
+
+const atualizarLideranca = async (req: Request, res: Response) => {
+  try {
+    const rawId = req.params.id;
+    const id = Array.isArray(rawId) ? rawId[0] : (rawId as string);
+    const dados = limparDados(req.body, true);
+    const erro = validar(dados, true);
+    if (erro) {
+      res.status(400).json({ error: erro });
+      return;
+    }
+    const atualizada = await leadershipsService.atualizar(id, dados);
+    res.json(atualizada);
+  } catch (error: any) {
+    if (error?.code === 'P2025') {
+      res.status(404).json({ error: 'Liderança não encontrada' });
+      return;
+    }
+    console.error('Erro ao atualizar liderança:', error);
+    res.status(500).json({ error: 'Erro ao atualizar liderança' });
   }
 };
 
@@ -76,6 +104,8 @@ app.get('/api/leaderships/:municipalityId', listarLiderancas);
 app.get('/leaderships/:municipalityId', listarLiderancas);
 app.post('/api/leaderships', criarLideranca);
 app.post('/leaderships', criarLideranca);
+app.put('/api/leaderships/:id', atualizarLideranca);
+app.put('/leaderships/:id', atualizarLideranca);
 app.delete('/api/leaderships/:id', removerLideranca);
 app.delete('/leaderships/:id', removerLideranca);
 

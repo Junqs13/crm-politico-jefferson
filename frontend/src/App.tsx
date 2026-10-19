@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Map as IconeMapa, ChartColumn, LogOut } from 'lucide-react';
 import { MapaDobradas } from './components/MapaDobradas';
 import { PainelBI } from './components/PainelBI';
 import { Login } from './components/Login';
+import { Marca } from './components/Marca';
+import { aquecerServidor } from './services/api';
 
 type Pagina = 'mapa' | 'bi';
 
@@ -17,6 +19,11 @@ const lerAutorizacao = () => {
 export function App() {
   const [autenticado, setAutenticado] = useState<boolean>(lerAutorizacao);
   const [paginaAtual, setPaginaAtual] = useState<Pagina>('mapa');
+
+  // Sessão já aberta: o app pula o login, então aquece aqui
+  useEffect(() => {
+    if (autenticado) aquecerServidor();
+  }, [autenticado]);
 
   const sair = () => {
     try {
@@ -34,7 +41,9 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1 className="topbar__marca">⚡ Jefferson Campos • CRM</h1>
+        <h1 className="topbar__marca">
+          <Marca tamanho={30} />
+        </h1>
 
         <div className="topbar__acoes">
           <nav className="nav-topo" aria-label="Navegação principal">

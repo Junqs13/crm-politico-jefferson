@@ -5,6 +5,7 @@ import axios from 'axios';
 import jsPDF from 'jspdf';
 import { List, X, ChevronDown, ChevronUp, FileText, Users, MessageCircle, Search, Layers } from 'lucide-react';
 import { getDobradas } from '../services/api';
+import { rastrear } from '../services/carregamento';
 import { PainelCRM } from './PainelCRM';
 import { ModalZonas, type ZonaEleitoral } from './ModalZonas';
 
@@ -13,6 +14,7 @@ interface MunicipioDado {
   municipio: string;
   codigoIbge: string;
   votosJefferson: number;
+  historicoJef?: Record<number, number>;
   historicoCandidatos: Record<string, Record<number, number>>;
   emendas: Record<string, number>;
   totalEmendas: number;
@@ -37,13 +39,41 @@ const normalizar = (texto: string) => {
 
 const combina = (consulta: string) => typeof window !== 'undefined' && !!window.matchMedia?.(consulta).matches;
 
-const CORES_LEGENDA = [
-  { cor: '#1e3a8a', texto: 'Reduto forte (> 20 mil)' },
-  { cor: '#2563eb', texto: 'Consolidada (5 mil a 20 mil)' },
-  { cor: '#3b82f6', texto: 'Média (1 mil a 5 mil)' },
-  { cor: '#93c5fd', texto: 'Baixa (até 1 mil)' },
-  { cor: '#334155', texto: 'Sem votos' },
-];
+type ModoCor = 'votos' | 'penetracao' | 'comparar';
+
+const SEM_DADO = '#334155';
+
+/* Cada modo tem suas faixas: a cor vem da primeira faixa que o valor alcança */
+const FAIXAS: Record<ModoCor, { min: number; cor: string; texto: string }[]> = {
+  votos: [
+    { min: 20000, cor: '#1e3a8a', texto: 'Reduto forte (mais de 20 mil)' },
+    { min: 5000, cor: '#2563eb', texto: 'Consolidada (5 mil a 20 mil)' },
+    { min: 1000, cor: '#3b82f6', texto: 'Média (1 mil a 5 mil)' },
+    { min: -Infinity, cor: '#93c5fd', texto: 'Baixa (até 1 mil)' },
+  ],
+  penetracao: [
+    { min: 5, cor: '#1e3a8a', texto: '5% ou mais do eleitorado' },
+    { min: 2, cor: '#2563eb', texto: '2% a 5%' },
+    { min: 1, cor: '#3b82f6', texto: '1% a 2%' },
+    { min: -Infinity, cor: '#93c5fd', texto: 'Menos de 1%' },
+  ],
+  // Verde-azulado para ganho e laranja para perda: legível também para daltônicos
+  comparar: [
+    { min: 25, cor: '#0d9488', texto: 'Cresceu 25% ou mais' },
+    { min: 0.0001, cor: '#5eead4', texto: 'Cresceu até 25%' },
+    { min: -0.0001, cor: '#64748b', texto: 'Sem variação' },
+    { min: -25, cor: '#fdba74', texto: 'Caiu até 25%' },
+    { min: -Infinity, cor: '#ea580c', texto: 'Caiu 25% ou mais' },
+  ],
+};
+
+const corDaFaixa = (modo: ModoCor, valor: number | null) => {
+  if (valor === null) return SEM_DADO;
+  return FAIXAS[modo].find((f) => valor >= f.min)?.cor ?? SEM_DADO;
+};
+
+const formatarPct = (v: number, sinal = false) =>
+  `${sinal && v > 0 ? '+' : ''}${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 
 /* Enquadra o estado ao carregar e voa até a cidade escolhida, deixando espaço para a ficha */
 function AjustarMapa({ geo, alvo }: { geo: any; alvo: string | null }) {
@@ -89,7 +119,10 @@ export function MapaDobradas() {
   const [crmAberto, setCrmAberto] = useState<boolean>(false);
   const [listaAberta, setListaAberta] = useState(false);
   const [fichaMinimizada, setFichaMinimizada] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
   const [legendaAberta, setLegendaAberta] = useState(() => combina('(min-width: 768px)'));
+  const [modoCor, setModoCor] = useState<ModoCor>('votos');
+  const [anoComparar, setAnoComparar] = useState<number>(2022);
 
   useEffect(() => {
     let ativo = true;
@@ -115,11 +148,16 @@ export function MapaDobradas() {
     return () => {
       ativo = false;
     };
-  }, [anoSelecionado]);
+  }, [anoSelecionado, tentativa]);
+
+  const tentarDeNovo = () => {
+    setCarregando(true);
+    setErroCarga(false);
+    setTentativa((t) => t + 1);
+  };
 
   useEffect(() => {
-    axios
-      .get(GEOJSON_SP)
+    rastrear(axios.get(GEOJSON_SP))
       .then((res: any) => setGeoJsonData(res.data))
       .catch((err: any) => console.error('Erro ao carregar GeoJSON', err));
   }, []);
@@ -278,6 +316,11 @@ export function MapaDobradas() {
       });
     }
 
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(140, 140, 140);
+    pdf.text(`API Cidadania 360 - gerado em ${new Date().toLocaleDateString('pt-BR')}`, 14, 290);
+
     pdf.save(`Dossie_Politico_${cidadeDestaque.municipio}.pdf`);
   };
 
@@ -288,7 +331,7 @@ export function MapaDobradas() {
         `👤 *Jefferson Campos (${anoSelecionado})*: ${cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos\n` +
         `📋 *Eleitores (Zonas)*: ${cidadeDestaque.eleitorado.totalEleitores.toLocaleString('pt-BR')} (Penetração: ${cidadeDestaque.eleitorado.penetracao})\n` +
         `💰 *Total de Emendas*: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cidadeDestaque.totalEmendas)}\n\n` +
-        `_Relatório gerado pelo CRM & BI Político._`
+        `_Relatório gerado pela API Cidadania 360._`
     );
     window.open(`https://api.whatsapp.com/send?text=${texto}`, '_blank');
   };
@@ -305,18 +348,49 @@ export function MapaDobradas() {
 
   const nomeDestaque = cidadeDestaque ? normalizar(cidadeDestaque.municipio) : null;
 
+  // Ano de comparação: nunca o mesmo ano da base; se coincidir, usa o ciclo anterior
+  const idxBase = anosDisponiveis.indexOf(anoSelecionado);
+  const cicloAnterior = idxBase > 0 ? anosDisponiveis[idxBase - 1] : anosDisponiveis[1];
+  const anoComp = anoComparar !== anoSelecionado ? anoComparar : cicloAnterior;
+
+  const penetracaoDe = (c: MunicipioDado) =>
+    c.eleitorado.totalEleitores > 0 && c.votosJefferson > 0 ? (c.votosJefferson / c.eleitorado.totalEleitores) * 100 : null;
+
+  // Variação dos votos de Jefferson Campos entre o ano base e o ano de comparação
+  const variacaoDe = (c: MunicipioDado) => {
+    const atual = c.historicoJef?.[anoSelecionado] ?? c.votosJefferson ?? 0;
+    const antes = c.historicoJef?.[anoComp] ?? 0;
+    if (!atual && !antes) return null;
+    const pct = antes ? ((atual - antes) / antes) * 100 : 100;
+    return { atual, antes, dif: atual - antes, pct };
+  };
+
+  const valorDoModo = (c: MunicipioDado | undefined): number | null => {
+    if (!c) return null;
+    if (modoCor === 'votos') return c.votosJefferson > 0 ? c.votosJefferson : null;
+    if (modoCor === 'penetracao') return penetracaoDe(c);
+    return variacaoDe(c)?.pct ?? null;
+  };
+
+  const detalheLista = (c: MunicipioDado) => {
+    const votos = `${c.votosJefferson.toLocaleString('pt-BR')} votos`;
+    if (modoCor === 'penetracao') {
+      const p = penetracaoDe(c);
+      return p === null ? votos : `${votos}, ${formatarPct(p)} do eleitorado`;
+    }
+    if (modoCor === 'comparar') {
+      const v = variacaoDe(c);
+      if (!v) return votos;
+      return v.antes ? `${votos}, ${formatarPct(v.pct, true)} sobre ${anoComp}` : `${votos}, sem votos em ${anoComp}`;
+    }
+    return votos;
+  };
+
+  const variacaoDestaque = cidadeDestaque && modoCor === 'comparar' ? variacaoDe(cidadeDestaque) : null;
+
   const mapStyle = (feature: any) => {
     const nomeFeature = normalizar(feature.properties.name);
-    const dadosCidade = dadosPorNome.get(nomeFeature);
-    let fillColor = '#334155';
-
-    if (dadosCidade && dadosCidade.votosJefferson > 0) {
-      const v = dadosCidade.votosJefferson;
-      if (v > 20000) fillColor = '#1e3a8a';
-      else if (v > 5000) fillColor = '#2563eb';
-      else if (v > 1000) fillColor = '#3b82f6';
-      else fillColor = '#93c5fd';
-    }
+    const fillColor = corDaFaixa(modoCor, valorDoModo(dadosPorNome.get(nomeFeature)));
 
     const isSelecionada = nomeDestaque === nomeFeature;
     return {
@@ -344,10 +418,19 @@ export function MapaDobradas() {
   );
 
   const statusLista = carregando
-    ? 'Carregando dados...'
+    ? `Carregando votos de ${anoSelecionado}...`
     : erroCarga
-    ? 'Não foi possível carregar os dados. Verifique a conexão.'
-    : `${cidadesFiltradas.length} municípios · votos de ${anoSelecionado}`;
+    ? 'O servidor não respondeu.'
+    : `${cidadesFiltradas.length} municípios, votos de ${anoSelecionado}`;
+
+  const avisoErro = erroCarga && !carregando && (
+    <div className="aviso-erro" role="alert">
+      <p>O servidor não respondeu. Confira a internet e tente de novo.</p>
+      <button className="btn btn--primario" onClick={tentarDeNovo}>
+        Tentar de novo
+      </button>
+    </div>
+  );
 
   return (
     <div className="mapa">
@@ -381,12 +464,20 @@ export function MapaDobradas() {
 
         <div className="mapa-lista__total">{statusLista}</div>
 
-        <div className="lista-cidades">
+        <div className="lista-cidades" aria-busy={carregando}>
+          {avisoErro}
+          {carregando && dados.length === 0 &&
+            Array.from({ length: 8 }).map((_, i) => <div key={i} className="esqueleto esqueleto--cidade" />)}
+          {!carregando && !erroCarga && termo && cidadesFiltradas.length === 0 && (
+            <p className="texto-vazio" style={{ padding: '8px 4px' }}>
+              Nenhum município com "{pesquisa}". Confira a grafia ou apague a busca.
+            </p>
+          )}
           {cidadesFiltradas.map((c) => (
             <button key={c.id} className={`cidade ${cidadeDestaque?.id === c.id ? 'is-ativo' : ''}`} onClick={() => selecionarCidade(c)}>
               <span>
                 <span className="cidade__nome">{c.municipio}</span>
-                <span className="cidade__votos num">{c.votosJefferson.toLocaleString('pt-BR')} votos</span>
+                <span className="cidade__votos num">{detalheLista(c)}</span>
               </span>
               <span className="cidade__pos num">{posicao.get(c.id)}º</span>
             </button>
@@ -403,21 +494,58 @@ export function MapaDobradas() {
           </button>
         </div>
 
+        {erroCarga && !carregando && <div className="aviso-mapa">{avisoErro}</div>}
+
         <div className="legenda">
           <button className="legenda__titulo" onClick={() => setLegendaAberta((v) => !v)} aria-expanded={legendaAberta}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Layers size={14} /> Legenda
+              <Layers size={14} /> Cores: {modoCor === 'votos' ? 'votos' : modoCor === 'penetracao' ? 'penetração' : `${anoSelecionado} x ${anoComp}`}
             </span>
             {legendaAberta ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
           {legendaAberta && (
             <div className="legenda__itens">
-              {CORES_LEGENDA.map((l) => (
+              <div className="modo-cor" role="group" aria-label="Colorir o mapa por">
+                {(
+                  [
+                    ['votos', 'Votos'],
+                    ['penetracao', 'Penetração'],
+                    ['comparar', 'Comparar'],
+                  ] as [ModoCor, string][]
+                ).map(([m, rotulo]) => (
+                  <button key={m} className={modoCor === m ? 'is-ativo' : ''} aria-pressed={modoCor === m} onClick={() => setModoCor(m)}>
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+
+              {modoCor === 'comparar' && (
+                <label className="modo-cor__comparar">
+                  {anoSelecionado} comparado com
+                  <select className="campo" value={anoComp} onChange={(e) => setAnoComparar(Number(e.target.value))}>
+                    {anosDisponiveis
+                      .filter((a) => a !== anoSelecionado)
+                      .map((a) => (
+                        <option key={a} value={a}>
+                          {a}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+
+              {FAIXAS[modoCor].map((l) => (
                 <div key={l.cor} className="legenda__item">
                   <span className="legenda__cor" style={{ backgroundColor: l.cor }} />
                   {l.texto}
                 </div>
               ))}
+              <div className="legenda__item">
+                <span className="legenda__cor" style={{ backgroundColor: SEM_DADO }} />
+                {modoCor === 'comparar' ? 'Sem votos nos dois anos' : 'Sem votos'}
+              </div>
+              {modoCor === 'penetracao' && <p className="legenda__nota">Votos do ano escolhido sobre o eleitorado de 2026.</p>}
+              {modoCor === 'comparar' && <p className="legenda__nota">Votos de Jefferson Campos em cada ano.</p>}
             </div>
           )}
         </div>
@@ -435,6 +563,13 @@ export function MapaDobradas() {
                 <p className="ficha__resumo num">
                   {cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos em {anoSelecionado}
                 </p>
+                {variacaoDestaque && (
+                  <p className={`ficha__variacao num ${variacaoDestaque.dif > 0 ? 'is-alta' : variacaoDestaque.dif < 0 ? 'is-baixa' : ''}`}>
+                    {variacaoDestaque.antes
+                      ? `${variacaoDestaque.dif > 0 ? '+' : ''}${variacaoDestaque.dif.toLocaleString('pt-BR')} votos (${formatarPct(variacaoDestaque.pct, true)}) sobre ${anoComp}, quando teve ${variacaoDestaque.antes.toLocaleString('pt-BR')}`
+                      : `Sem votos registrados em ${anoComp}`}
+                  </p>
+                )}
               </div>
               <div className="ficha__cab-botoes">
                 <button

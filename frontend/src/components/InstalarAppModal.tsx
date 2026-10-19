@@ -1,14 +1,9 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import { detectarPlataforma, type Plataforma } from '../services/pwa';
 
-type Dispositivo = 'ios' | 'android' | 'pc';
-
-const detectarDispositivo = (): Dispositivo => {
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && 'ontouchend' in document)) return 'ios';
-  if (/Android/i.test(ua)) return 'android';
-  return 'pc';
-};
+type Dispositivo = Plataforma;
+const detectarDispositivo = detectarPlataforma;
 
 export function InstalarAppModal({ onClose }: { onClose: () => void }) {
   const [dispositivo, setDispositivo] = useState<Dispositivo>(detectarDispositivo);
@@ -19,7 +14,11 @@ export function InstalarAppModal({ onClose }: { onClose: () => void }) {
         <div className="modal__cab">
           <div>
             <h2 id="titulo-instalar">📲 Instalar na tela inicial</h2>
-            <p className="modal__sub">Abra o CRM direto pelo ícone, sem procurar o site no navegador.</p>
+            <p className="modal__sub">
+              {dispositivo === 'ios'
+                ? 'No iPhone e no iPad a Apple não permite instalar com um clique. Siga os passos no Safari.'
+                : 'Este navegador não ofereceu a instalação direta. Siga os passos abaixo.'}
+            </p>
           </div>
           <button className="btn-icone" onClick={onClose} aria-label="Fechar">
             <X size={18} />
@@ -47,7 +46,7 @@ export function InstalarAppModal({ onClose }: { onClose: () => void }) {
                   <li>Abra este site no Safari.</li>
                   <li>Toque no botão Compartilhar (o quadrado com a seta para cima).</li>
                   <li>Role as opções e escolha "Adicionar à Tela de Início".</li>
-                  <li>Toque em Adicionar. O ícone aparece junto com os outros apps.</li>
+                  <li>Toque em Adicionar. O ícone Cidadania 360 aparece junto com os outros apps.</li>
                 </ol>
               </>
             )}
@@ -69,8 +68,8 @@ export function InstalarAppModal({ onClose }: { onClose: () => void }) {
                 <p>No Chrome ou Edge (computador):</p>
                 <ol>
                   <li>Na barra de endereço, clique no ícone de instalar (um monitor com seta) ou nos três pontinhos do navegador.</li>
-                  <li>Escolha "Instalar Jefferson Campos CRM".</li>
-                  <li>O CRM abre numa janela própria e ganha um atalho na Área de Trabalho.</li>
+                  <li>Escolha "Instalar API Cidadania 360".</li>
+                  <li>O app abre numa janela própria e ganha um atalho na Área de Trabalho.</li>
                 </ol>
               </>
             )}

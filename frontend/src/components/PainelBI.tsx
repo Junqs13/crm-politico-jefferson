@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getDobradas } from '../services/api';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import { Line } from 'react-chartjs-2';
@@ -16,6 +16,7 @@ interface MunicipioBI {
   totalDestinacoes: number;
   emendas: Record<string, number>;
   historicoJef: Record<number, number>;
+  historicoCandidatos?: Record<string, Record<number, number>>;
   eleitorado: {
     totalEleitores: number;
     penetracao: string;
@@ -33,15 +34,40 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
   const [termoBusca, setTermoBusca] = useState<string>('');
   const [cidadeAtiva, setCidadeAtiva] = useState<MunicipioBI | null>(null);
   const [modalZonasAberto, setModalZonasAberto] = useState<boolean>(false);
+  const [carregando, setCarregando] = useState(true);
+  const [erroCarga, setErroCarga] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
 
   useEffect(() => {
+    let ativo = true;
     getDobradas(2026)
       .then((res: any) => {
-        if (Array.isArray(res)) setDados(res);
+        if (!ativo) return;
+        if (Array.isArray(res)) {
+          setDados(res);
+          setErroCarga(false);
+        } else {
+          setErroCarga(true);
+        }
         setCidadeAtiva(null);
       })
-      .catch((err: any) => console.error('Erro ao carregar metas:', err));
-  }, []);
+      .catch((err: any) => {
+        console.error('Erro ao carregar metas:', err);
+        if (ativo) setErroCarga(true);
+      })
+      .finally(() => {
+        if (ativo) setCarregando(false);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [tentativa]);
+
+  const tentarDeNovo = () => {
+    setCarregando(true);
+    setErroCarga(false);
+    setTentativa((t) => t + 1);
+  };
 
   const selecionarCidade = (nome: string) => {
     setTermoBusca(nome);
@@ -92,6 +118,11 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
       y += 16;
     });
 
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(140, 140, 140);
+    pdf.text(`API Cidadania 360 - gerado em ${new Date().toLocaleDateString('pt-BR')}`, 14, 290);
+
     pdf.save("Relatorio_Estrategico_Campanha_2028.pdf");
   };
 
@@ -137,7 +168,36 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
   const formatCurrency = (val: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 
-  const valorKpi = (cidade: number, geral: number) => (cidadeAtiva ? cidade : geral).toLocaleString('pt-BR');
+  // Ranking real: soma os votos de cada candidato cadastrado, no estado ou na cidade escolhida
+  const [anoRanking, setAnoRanking] = useState(2026);
+  const anosComVotos = useMemo(() => {
+    const presentes = new Set<number>();
+    dados.forEach((c) =>
+      Object.values(c.historicoCandidatos || {}).forEach((porAno) =>
+        Object.entries(porAno).forEach(([ano, v]) => {
+          if (v) presentes.add(Number(ano));
+        })
+      )
+    );
+    return [...presentes].sort((a, b) => b - a);
+  }, [dados]);
+
+  const ranking = useMemo(() => {
+    const soma = new Map<string, number>();
+    const fonte = cidadeAtiva ? [cidadeAtiva] : dados;
+    fonte.forEach((c) =>
+      Object.entries(c.historicoCandidatos || {}).forEach(([nome, porAno]) => {
+        const v = porAno[anoRanking];
+        if (v) soma.set(nome, (soma.get(nome) || 0) + v);
+      })
+    );
+    return [...soma.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [dados, cidadeAtiva, anoRanking]);
+  const totalRanking = ranking.reduce((acc, [, v]) => acc + v, 0);
+
+  const semDados = carregando && dados.length === 0;
+  const valorKpi = (cidade: number, geral: number) =>
+    semDados ? <span className="esqueleto esqueleto--numero" aria-label="Carregando" /> : (cidadeAtiva ? cidade : geral).toLocaleString('pt-BR');
 
   return (
     <div className="bi">
@@ -191,6 +251,15 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
         </div>
       </div>
 
+      {erroCarga && !carregando && (
+        <div className="aviso-erro" role="alert" style={{ marginBottom: '20px' }}>
+          <p>O servidor não respondeu e as metas não carregaram. Confira a internet e tente de novo.</p>
+          <button className="btn btn--primario" onClick={tentarDeNovo}>
+            Tentar de novo
+          </button>
+        </div>
+      )}
+
       {/* INDICADORES */}
       <div className="kpis">
         <div className="kpi">
@@ -218,7 +287,7 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
           <div className="kpi">
             <p className="rotulo-peq">Total de eleitores (estado)</p>
             <p className="kpi__valor num" style={{ color: 'var(--green)' }}>
-              {totalGeralEleitoresSP.toLocaleString('pt-BR')}
+              {semDados ? <span className="esqueleto esqueleto--numero" aria-label="Carregando" /> : totalGeralEleitoresSP.toLocaleString('pt-BR')}
             </p>
           </div>
         )}
@@ -236,7 +305,7 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
         <div className="painel">
           <h3>{cidadeAtiva ? `Evolução em ${cidadeAtiva.municipio}` : 'Evolução global (Estado de São Paulo)'}</h3>
           <div className="grafico">
-            <Line data={chartDataLine} options={chartOptions} />
+            {semDados ? <div className="esqueleto esqueleto--grafico" aria-label="Carregando gráfico" /> : <Line data={chartDataLine} options={chartOptions} />}
           </div>
         </div>
 
@@ -268,27 +337,63 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
         </div>
       </div>
 
-      {/* TOP 5 */}
+      {/* RANKING DOS CANDIDATOS CADASTRADOS */}
       <div className="painel">
-        <h3 style={{ color: 'var(--blue-l)' }}>
-          {cidadeAtiva ? `Top 5 deputados mais votados em ${cidadeAtiva.municipio}` : 'Panorama geral dos principais redutos (estado)'}
-        </h3>
-        <div className="top5">
-          <div className="top5__item top5__item--jc">
-            <span>1º lugar</span>
-            <p>Jefferson Campos</p>
-            <span className="num" style={{ color: 'var(--blue-l)' }}>
-              {cidadeAtiva ? cidadeAtiva.votosJefferson.toLocaleString('pt-BR') + ' votos' : totalGeralVotos2026.toLocaleString('pt-BR') + ' votos (SP)'}
-            </span>
+        <div className="ranking__cab">
+          <div>
+            <h3 style={{ color: 'var(--blue-l)', margin: 0 }}>
+              {cidadeAtiva ? `Mais votados em ${cidadeAtiva.municipio}` : 'Mais votados no estado'}
+            </h3>
+            <p className="ranking__nota">Entre os candidatos cadastrados no sistema. O percentual é a fatia de cada um na soma da lista.</p>
           </div>
-          {['A', 'B', 'C', 'D'].map((letra, i) => (
-            <div key={letra} className="top5__item">
-              <span>{i + 2}º lugar</span>
-              <p>Concorrente {letra}</p>
-              <span>Referência regional</span>
+          {anosComVotos.length > 0 && (
+            <div className="anos ranking__anos" role="group" aria-label="Ano do ranking">
+              {anosComVotos.map((ano) => (
+                <button
+                  key={ano}
+                  className={`ano ${anoRanking === ano ? 'is-ativo' : ''}`}
+                  aria-pressed={anoRanking === ano}
+                  onClick={() => setAnoRanking(ano)}
+                >
+                  {ano}
+                </button>
+              ))}
             </div>
-          ))}
+          )}
         </div>
+
+        {semDados ? (
+          <div className="esqueleto" style={{ height: '140px' }} />
+        ) : ranking.length === 0 ? (
+          <p className="texto-vazio">
+            {cidadeAtiva
+              ? `Nenhum voto registrado em ${anoRanking} para ${cidadeAtiva.municipio}. Escolha outro ano.`
+              : `Nenhum voto registrado em ${anoRanking}. Escolha outro ano.`}
+          </p>
+        ) : (
+          <ol className="ranking">
+            {ranking.map(([nome, votos], i) => {
+              const ehJefferson = nome.toUpperCase().includes('JEFFERSON CAMPOS');
+              return (
+                <li key={nome} className={`ranking__item ${ehJefferson ? 'is-jc' : ''}`}>
+                  <span className="ranking__pos num">{i + 1}º</span>
+                  <div className="ranking__info">
+                    <div className="ranking__linha">
+                      <strong>{nome}</strong>
+                      <span className="num">
+                        {votos.toLocaleString('pt-BR')} votos
+                        <small> ({((votos / (totalRanking || 1)) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%)</small>
+                      </span>
+                    </div>
+                    <div className="barra">
+                      <div style={{ width: `${(votos / (ranking[0][1] || 1)) * 100}%` }} />
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </div>
 
       {modalZonasAberto && cidadeAtiva && (
