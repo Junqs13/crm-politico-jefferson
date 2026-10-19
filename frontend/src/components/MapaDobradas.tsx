@@ -1,15 +1,12 @@
-import { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, TileLayer, GeoJSON, ZoomControl, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import axios from 'axios';
 import jsPDF from 'jspdf';
+import { List, X, ChevronDown, ChevronUp, FileText, Users, MessageCircle, Search, Layers } from 'lucide-react';
 import { getDobradas } from '../services/api';
 import { PainelCRM } from './PainelCRM';
-
-interface ZonaEleitoral {
-  zona: string;
-  quantidade: string;
-}
+import { ModalZonas, type ZonaEleitoral } from './ModalZonas';
 
 interface MunicipioDado {
   id: string;
@@ -27,46 +24,134 @@ interface MunicipioDado {
   };
 }
 
+const GEOJSON_SP = 'https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-35-mun.json';
+
+const normalizar = (texto: string) => {
+  if (!texto) return '';
+  return texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .trim();
+};
+
+const combina = (consulta: string) => typeof window !== 'undefined' && !!window.matchMedia?.(consulta).matches;
+
+const CORES_LEGENDA = [
+  { cor: '#1e3a8a', texto: 'Reduto forte (> 20 mil)' },
+  { cor: '#2563eb', texto: 'Consolidada (5 mil a 20 mil)' },
+  { cor: '#3b82f6', texto: 'Média (1 mil a 5 mil)' },
+  { cor: '#93c5fd', texto: 'Baixa (até 1 mil)' },
+  { cor: '#334155', texto: 'Sem votos' },
+];
+
+/* Enquadra o estado ao carregar e voa até a cidade escolhida, deixando espaço para a ficha */
+function AjustarMapa({ geo, alvo }: { geo: any; alvo: string | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!geo) return;
+    const deitado = combina('(max-height: 520px) and (orientation: landscape) and (max-width: 1023px)');
+    const lateral = combina('(min-width: 1024px)') || deitado;
+    const celular = combina('(max-width: 767px)');
+    const altura = map.getSize().y;
+
+    if (alvo) {
+      const feature = geo.features?.find((f: any) => normalizar(f.properties?.name) === alvo);
+      if (!feature) return;
+      map.flyToBounds(L.geoJSON(feature).getBounds(), {
+        paddingTopLeft: [20, celular ? 110 : 20],
+        paddingBottomRight: lateral ? [deitado ? Math.round(map.getSize().x * 0.56) + 20 : 440, 20] : [20, Math.round(altura * (celular ? 0.66 : 0.55))],
+        maxZoom: 10,
+        duration: 0.6,
+      });
+    } else {
+      map.fitBounds(L.geoJSON(geo).getBounds(), {
+        paddingTopLeft: [12, celular ? 64 : 12],
+        paddingBottomRight: [12, 12],
+      });
+    }
+  }, [geo, alvo, map]);
+
+  return null;
+}
+
 export function MapaDobradas() {
   const anosDisponiveis = [2002, 2006, 2010, 2014, 2018, 2022, 2026];
   const [dados, setDados] = useState<MunicipioDado[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erroCarga, setErroCarga] = useState(false);
   const [geoJsonData, setGeoJsonData] = useState<any>(null);
   const [anoSelecionado, setAnoSelecionado] = useState<number>(2026);
   const [pesquisa, setPesquisa] = useState('');
   const [cidadeDestaque, setCidadeDestaque] = useState<MunicipioDado | null>(null);
   const [modalZonasAberto, setModalZonasAberto] = useState<boolean>(false);
   const [crmAberto, setCrmAberto] = useState<boolean>(false);
-  const fichaRef = useRef<HTMLDivElement>(null);
+  const [listaAberta, setListaAberta] = useState(false);
+  const [fichaMinimizada, setFichaMinimizada] = useState(false);
+  const [legendaAberta, setLegendaAberta] = useState(() => combina('(min-width: 768px)'));
 
   useEffect(() => {
+    let ativo = true;
     getDobradas(anoSelecionado)
       .then((res: MunicipioDado[]) => {
-        if (Array.isArray(res)) {
-          setDados(res);
-          // Atualiza a cidade em destaque se já houver uma selecionada
-          if (cidadeDestaque) {
-            const atualizada = res.find((c) => c.id === cidadeDestaque.id);
-            if (atualizada) setCidadeDestaque(atualizada);
-          }
+        if (!ativo) return;
+        if (!Array.isArray(res)) {
+          setErroCarga(true);
+          return;
         }
+        setErroCarga(false);
+        setDados(res);
+        // Mantém a cidade aberta com os números do novo ano
+        setCidadeDestaque((atual) => (atual ? res.find((c) => c.id === atual.id) ?? atual : atual));
       })
-      .catch((err: any) => console.error('Erro ao buscar dobradas:', err));
-
-    if (!geoJsonData) {
-      axios
-        .get('https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-35-mun.json')
-        .then((res: any) => setGeoJsonData(res.data))
-        .catch((err: any) => console.error('Erro ao carregar GeoJSON', err));
-    }
+      .catch((err: any) => {
+        console.error('Erro ao buscar dobradas:', err);
+        if (ativo) setErroCarga(true);
+      })
+      .finally(() => {
+        if (ativo) setCarregando(false);
+      });
+    return () => {
+      ativo = false;
+    };
   }, [anoSelecionado]);
 
-  const normalizar = (texto: string) => {
-    if (!texto) return '';
-    return texto
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toUpperCase()
-      .trim();
+  useEffect(() => {
+    axios
+      .get(GEOJSON_SP)
+      .then((res: any) => setGeoJsonData(res.data))
+      .catch((err: any) => console.error('Erro ao carregar GeoJSON', err));
+  }, []);
+
+  const dadosPorNome = useMemo(() => {
+    const mapa = new Map<string, MunicipioDado>();
+    dados.forEach((d) => mapa.set(normalizar(d.municipio), d));
+    return mapa;
+  }, [dados]);
+
+  // O clique no mapa lê sempre os dados mais recentes, mesmo depois de trocar o ano
+  const dadosPorNomeRef = useRef(dadosPorNome);
+  useEffect(() => {
+    dadosPorNomeRef.current = dadosPorNome;
+  }, [dadosPorNome]);
+
+  const cidadesOrdenadas = useMemo(() => [...dados].sort((a, b) => b.votosJefferson - a.votosJefferson), [dados]);
+  const posicao = useMemo(() => new Map(cidadesOrdenadas.map((c, i) => [c.id, i + 1])), [cidadesOrdenadas]);
+  const termo = normalizar(pesquisa);
+  const cidadesFiltradas = termo ? cidadesOrdenadas.filter((c) => normalizar(c.municipio).includes(termo)) : cidadesOrdenadas;
+
+  const trocarAno = (ano: number) => {
+    if (ano === anoSelecionado) return;
+    setCarregando(true);
+    setErroCarga(false);
+    setAnoSelecionado(ano);
+  };
+
+  const selecionarCidade = (c: MunicipioDado) => {
+    setCidadeDestaque(c);
+    setFichaMinimizada(false);
+    setListaAberta(false);
   };
 
   const formatCurrency = (val: number) =>
@@ -208,9 +293,21 @@ export function MapaDobradas() {
     window.open(`https://api.whatsapp.com/send?text=${texto}`, '_blank');
   };
 
+  // No celular a faixa de anos rola de lado: mantém o ano escolhido à vista
+  const anosMobileRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const faixa = anosMobileRef.current;
+    const ativo = faixa?.querySelector<HTMLElement>('.ano.is-ativo');
+    if (faixa && ativo && faixa.scrollWidth > faixa.clientWidth) {
+      faixa.scrollLeft = ativo.offsetLeft - faixa.clientWidth / 2 + ativo.offsetWidth / 2;
+    }
+  }, [anoSelecionado]);
+
+  const nomeDestaque = cidadeDestaque ? normalizar(cidadeDestaque.municipio) : null;
+
   const mapStyle = (feature: any) => {
     const nomeFeature = normalizar(feature.properties.name);
-    const dadosCidade = dados.find((d) => normalizar(d.municipio) === nomeFeature);
+    const dadosCidade = dadosPorNome.get(nomeFeature);
     let fillColor = '#334155';
 
     if (dadosCidade && dadosCidade.votosJefferson > 0) {
@@ -221,7 +318,7 @@ export function MapaDobradas() {
       else fillColor = '#93c5fd';
     }
 
-    const isSelecionada = cidadeDestaque && normalizar(cidadeDestaque.municipio) === nomeFeature;
+    const isSelecionada = nomeDestaque === nomeFeature;
     return {
       fillColor,
       weight: isSelecionada ? 3 : 1,
@@ -231,152 +328,180 @@ export function MapaDobradas() {
     };
   };
 
+  const seletorAnos = (
+    <div className="anos" role="group" aria-label="Ciclo eleitoral" ref={anosMobileRef}>
+      {anosDisponiveis.map((ano) => (
+        <button
+          key={ano}
+          className={`ano ${anoSelecionado === ano ? 'is-ativo' : ''}`}
+          aria-pressed={anoSelecionado === ano}
+          onClick={() => trocarAno(ano)}
+        >
+          {ano}
+        </button>
+      ))}
+    </div>
+  );
+
+  const statusLista = carregando
+    ? 'Carregando dados...'
+    : erroCarga
+    ? 'Não foi possível carregar os dados. Verifique a conexão.'
+    : `${cidadesFiltradas.length} municípios · votos de ${anoSelecionado}`;
+
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', height: 'calc(100vh - 60px)', width: '100vw', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc', overflow: 'hidden' }}>
-      
-      {/* SIDEBAR RESPONSIVA */}
-      <div style={{ width: 'clamp(280px, 30vw, 380px)', minWidth: '260px', backgroundColor: '#1e293b', display: 'flex', flexDirection: 'column', zIndex: 1000, borderRight: '1px solid #334155', height: '100%' }}>
-        <div style={{ padding: '16px', backgroundColor: '#0f172a' }}>
-          <h2 style={{ margin: 0, fontSize: '16px', color: '#facc15' }}>Mapa Eleitoral - SP</h2>
+    <div className="mapa">
+      {/* LISTA DE MUNICÍPIOS (lateral no tablet e desktop, tela cheia no celular) */}
+      <aside className={`mapa-lista ${listaAberta ? 'is-aberta' : ''}`} aria-label="Lista de municípios">
+        <div className="mapa-lista__cab">
+          <h2>Mapa Eleitoral - SP</h2>
+          <button className="btn-icone mapa-lista__fechar" onClick={() => setListaAberta(false)} aria-label="Voltar ao mapa">
+            <X size={18} />
+          </button>
         </div>
 
-        <div style={{ padding: '12px', borderBottom: '1px solid #334155' }}>
-          <p style={{ margin: '0 0 6px 0', fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Ciclo Eleitoral Base</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-            {anosDisponiveis.map((ano) => (
-              <button
-                key={ano}
-                onClick={() => setAnoSelecionado(ano)}
-                style={{
-                  padding: '5px 8px',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '11px',
-                  backgroundColor: anoSelecionado === ano ? '#facc15' : '#334155',
-                  color: anoSelecionado === ano ? '#0f172a' : '#cbd5e1',
-                }}
-              >
-                {ano}
-              </button>
-            ))}
-          </div>
+        <div className="mapa-lista__bloco bloco-anos">
+          <p className="rotulo-peq">Ciclo eleitoral base</p>
+          {seletorAnos}
         </div>
 
-        <div style={{ padding: '12px' }}>
-          <input
-            type="text"
-            placeholder="🔍 Pesquisar município..."
-            value={pesquisa}
-            onChange={(e) => setPesquisa(e.target.value)}
-            style={{ width: '100%', padding: '10px', borderRadius: '6px', border: 'none', backgroundColor: '#334155', color: 'white', outline: 'none', fontSize: '13px', boxSizing: 'border-box' }}
-          />
+        <div className="mapa-lista__bloco">
+          <label className="busca">
+            <Search size={16} />
+            <input
+              type="search"
+              enterKeyHint="search"
+              placeholder="Pesquisar município"
+              aria-label="Pesquisar município"
+              value={pesquisa}
+              onChange={(e) => setPesquisa(e.target.value)}
+            />
+          </label>
         </div>
 
-        <div style={{ padding: '0 12px', overflowY: 'auto', flex: 1 }}>
-          {dados
-            .filter((c) => c.municipio.toLowerCase().includes(pesquisa.toLowerCase()))
-            .sort((a, b) => b.votosJefferson - a.votosJefferson)
-            .map((c) => (
-              <div
-                key={c.id}
-                onClick={() => setCidadeDestaque(c)}
-                style={{
-                  marginBottom: '6px',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  backgroundColor: cidadeDestaque?.id === c.id ? '#3b82f6' : '#334155',
-                }}
-              >
-                <strong style={{ fontSize: '13px', display: 'block' }}>{c.municipio}</strong>
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                  Jefferson Campos: {c.votosJefferson.toLocaleString('pt-BR')} v.
-                </span>
-              </div>
-            ))}
-        </div>
-      </div>
+        <div className="mapa-lista__total">{statusLista}</div>
 
-      {/* MAPA & FICHA MASTER RESPONSIVOS */}
-      <div style={{ flex: 1, position: 'relative', minWidth: '300px', height: '100%' }}>
-        
-        {/* LEGENDA DE CORES DO MAPA */}
-        <div style={{ position: 'absolute', bottom: '20px', left: '20px', backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', zIndex: 1000, boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)', border: '1px solid #334155', fontSize: '11px', maxWidth: '240px' }}>
-          <strong style={{ display: 'block', marginBottom: '6px', color: '#facc15', textTransform: 'uppercase' }}>Legenda de Força</strong>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}><span style={{ width: '12px', height: '12px', backgroundColor: '#1e3a8a', display: 'inline-block', borderRadius: '2px' }}></span> Reduto Forte (&gt; 20k)</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}><span style={{ width: '12px', height: '12px', backgroundColor: '#2563eb', display: 'inline-block', borderRadius: '2px' }}></span> Consolidada (5k - 20k)</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}><span style={{ width: '12px', height: '12px', backgroundColor: '#3b82f6', display: 'inline-block', borderRadius: '2px' }}></span> Média (1k - 5k)</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ width: '12px', height: '12px', backgroundColor: '#334155', display: 'inline-block', borderRadius: '2px' }}></span> Sem Votos</div>
+        <div className="lista-cidades">
+          {cidadesFiltradas.map((c) => (
+            <button key={c.id} className={`cidade ${cidadeDestaque?.id === c.id ? 'is-ativo' : ''}`} onClick={() => selecionarCidade(c)}>
+              <span>
+                <span className="cidade__nome">{c.municipio}</span>
+                <span className="cidade__votos num">{c.votosJefferson.toLocaleString('pt-BR')} votos</span>
+              </span>
+              <span className="cidade__pos num">{posicao.get(c.id)}º</span>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      {/* MAPA */}
+      <section className="mapa-area">
+        <div className="topo-mobile">
+          {seletorAnos}
+          <button className="btn btn--primario btn-lista" onClick={() => setListaAberta(true)}>
+            <List size={18} /> Lista
+          </button>
         </div>
 
+        <div className="legenda">
+          <button className="legenda__titulo" onClick={() => setLegendaAberta((v) => !v)} aria-expanded={legendaAberta}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Layers size={14} /> Legenda
+            </span>
+            {legendaAberta ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          {legendaAberta && (
+            <div className="legenda__itens">
+              {CORES_LEGENDA.map((l) => (
+                <div key={l.cor} className="legenda__item">
+                  <span className="legenda__cor" style={{ backgroundColor: l.cor }} />
+                  {l.texto}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* FICHA DO MUNICÍPIO */}
         {cidadeDestaque && (
-          <div style={{ position: 'absolute', top: '15px', right: '15px', width: 'clamp(300px, 35vw, 450px)', zIndex: 2000, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)', borderRadius: '12px', overflow: 'hidden', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
-            <div ref={fichaRef} style={{ backgroundColor: '#0f172a', padding: '20px', color: '#f8fafc', overflowY: 'auto', flex: 1 }}>
-              <p style={{ margin: '0 0 4px 0', fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>VISÃO Político Municipal</p>
-              <h1 style={{ margin: '0 0 12px 0', fontSize: '24px', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                {cidadeDestaque.municipio} <span style={{ fontSize: '11px', backgroundColor: '#facc15', color: '#0f172a', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>SP</span>
-              </h1>
-
-              <div style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #334155' }}>
-                <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Votação em {anoSelecionado}</span>
-                <h2 style={{ margin: '4px 0 0 0', fontSize: '22px', color: '#60a5fa' }}>{cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos</h2>
+          <div className={`ficha ${fichaMinimizada ? 'is-min' : ''}`} role="dialog" aria-label={`Ficha de ${cidadeDestaque.municipio}`}>
+            <div className="ficha__alca" onClick={() => setFichaMinimizada((v) => !v)} />
+            <div className="ficha__cab">
+              <div className="ficha__cab-texto">
+                <p className="rotulo-peq">Visão político municipal</p>
+                <h2 className="ficha__nome">
+                  {cidadeDestaque.municipio} <span className="ficha__uf">SP</span>
+                </h2>
+                <p className="ficha__resumo num">
+                  {cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos em {anoSelecionado}
+                </p>
               </div>
+              <div className="ficha__cab-botoes">
+                <button
+                  className="btn-icone ficha__min"
+                  onClick={() => setFichaMinimizada((v) => !v)}
+                  aria-label={fichaMinimizada ? 'Expandir ficha' : 'Minimizar ficha'}
+                >
+                  {fichaMinimizada ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </button>
+                <button className="btn-icone" onClick={() => setCidadeDestaque(null)} aria-label="Fechar ficha">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
 
-              <div
-                onClick={() => setModalZonasAberto(true)}
-                style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px', cursor: 'pointer', border: '1px solid #334155' }}
-                title="Clique para ver o detalhamento por zona eleitoral"
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="ficha__corpo">
+              <button className="cartao cartao--botao" onClick={() => setModalZonasAberto(true)} title="Ver o eleitorado por zona eleitoral">
+                <div className="cartao__linha">
                   <div>
-                    <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Eleitores (Zonas) 📋</span>
-                    <h3 style={{ margin: '4px 0 0 0', fontSize: '18px', color: '#4ade80' }}>{cidadeDestaque.eleitorado.totalEleitores.toLocaleString('pt-BR')}</h3>
+                    <p className="rotulo-peq">Eleitores (ver zonas) 📋</p>
+                    <p className="cartao__valor num" style={{ color: 'var(--green)' }}>
+                      {cidadeDestaque.eleitorado.totalEleitores.toLocaleString('pt-BR')}
+                    </p>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Penetração</span>
-                    <h3 style={{ margin: '4px 0 0 0', fontSize: '18px', color: '#60a5fa' }}>{cidadeDestaque.eleitorado.penetracao}</h3>
+                    <p className="rotulo-peq">Penetração</p>
+                    <p className="cartao__valor num" style={{ color: 'var(--blue-l)' }}>
+                      {cidadeDestaque.eleitorado.penetracao}
+                    </p>
                   </div>
                 </div>
-              </div>
+              </button>
 
-              <div style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#facc15' }}>Total de Emendas Destinadas</h3>
-                <p style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(cidadeDestaque.totalEmendas)}</p>
-                <p style={{ margin: '3px 0 10px 0', fontSize: '10px', color: '#94a3b8' }}>{cidadeDestaque.totalDestinacoes} destinações em {Object.keys(cidadeDestaque.emendas).length} áreas.</p>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {Object.entries(cidadeDestaque.emendas)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([cat, val]) => (
-                      <div key={cat}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
-                          <span>{cat}</span>
-                          <strong style={{ color: '#facc15' }}>{formatCurrency(val as number)}</strong>
-                        </div>
-                        <div style={{ width: '100%', height: '3px', backgroundColor: '#334155', borderRadius: '2px' }}>
-                          <div style={{ width: `${((val as number) / (cidadeDestaque.totalEmendas || 1)) * 100}%`, height: '100%', backgroundColor: '#facc15' }}></div>
-                        </div>
+              <div className="cartao">
+                <h3 className="cartao__titulo" style={{ color: 'var(--accent)' }}>Total de emendas destinadas</h3>
+                <p className="cartao__valor num" style={{ marginTop: 0 }}>{formatCurrency(cidadeDestaque.totalEmendas)}</p>
+                <p className="cartao__nota">
+                  {cidadeDestaque.totalDestinacoes} destinações em {Object.keys(cidadeDestaque.emendas).length} áreas.
+                </p>
+                {Object.entries(cidadeDestaque.emendas)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([cat, val]) => (
+                    <div key={cat} className="barra-cat">
+                      <div className="barra-cat__topo">
+                        <span>{cat}</span>
+                        <strong className="num">{formatCurrency(val as number)}</strong>
                       </div>
-                    ))}
-                </div>
+                      <div className="barra">
+                        <div style={{ width: `${((val as number) / (cidadeDestaque.totalEmendas || 1)) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
               </div>
 
-              <div style={{ backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px' }}>
-                <h3 style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#60a5fa' }}>Histórico por Candidato e Ano</h3>
-
+              <div className="cartao cartao--largo">
+                <h3 className="cartao__titulo" style={{ color: 'var(--blue-l)' }}>Histórico por candidato e ano</h3>
                 {cidadeDestaque.historicoCandidatos &&
                   Object.entries(cidadeDestaque.historicoCandidatos).map(([candName, anosVotos]) => (
-                    <div key={candName} style={{ marginBottom: '10px', borderBottom: '1px solid #334155', paddingBottom: '6px' }}>
-                      <strong style={{ fontSize: '11px', color: '#facc15', display: 'block', marginBottom: '3px' }}>{candName}</strong>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    <div key={candName} className="hist-cand">
+                      <strong>{candName}</strong>
+                      <div className="hist-anos">
                         {anosDisponiveis.map((ano) => {
                           const v = anosVotos[ano];
                           if (v === undefined || v === 0) return null;
                           return (
-                            <div key={ano} style={{ backgroundColor: '#0f172a', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>
-                              <span style={{ color: '#94a3b8' }}>{ano}:</span> <strong style={{ color: '#60a5fa' }}>{v.toLocaleString('pt-BR')}</strong>
+                            <div key={ano} className="hist-ano num">
+                              <span>{ano}:</span> <b>{v.toLocaleString('pt-BR')}</b>
                             </div>
                           );
                         })}
@@ -386,94 +511,65 @@ export function MapaDobradas() {
               </div>
             </div>
 
-            <div style={{ padding: '10px', backgroundColor: '#1e293b', borderTop: '1px solid #334155', display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-              <button onClick={exportarFichaPDF} style={{ flex: 1, minWidth: '60px', padding: '8px 4px', border: 'none', backgroundColor: '#dc2626', color: 'white', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', textTransform: 'uppercase' }}>
-                📄 PDF
+            <div className="ficha__acoes">
+              <button className="btn acao acao--pdf" onClick={exportarFichaPDF}>
+                <FileText size={16} /> PDF
               </button>
-              <button onClick={() => setCrmAberto(true)} style={{ flex: 1, minWidth: '70px', padding: '8px 4px', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', textTransform: 'uppercase' }}>
-                👥 Lideranças
+              <button className="btn acao acao--crm" onClick={() => setCrmAberto(true)}>
+                <Users size={16} /> Lideranças
               </button>
-              <button onClick={compartilharWhatsApp} style={{ flex: 1, minWidth: '55px', padding: '8px 4px', border: 'none', backgroundColor: '#25D366', color: 'white', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', textTransform: 'uppercase' }}>
-                💬 Zap
-              </button>
-              <button onClick={() => setCidadeDestaque(null)} style={{ padding: '8px 10px', border: 'none', backgroundColor: '#334155', color: 'white', cursor: 'pointer', borderRadius: '6px', fontWeight: 'bold' }}>
-                X
+              <button className="btn acao acao--zap" onClick={compartilharWhatsApp}>
+                <MessageCircle size={16} /> WhatsApp
               </button>
             </div>
           </div>
         )}
 
-        <MapContainer center={[-22.5, -48.5]} zoom={7} style={{ height: '100%', width: '100%', zIndex: 1, backgroundColor: '#0f172a' }}>
+        <MapContainer
+          center={[-22.3, -48.6]}
+          zoom={6}
+          zoomSnap={0.25}
+          zoomControl={false}
+          preferCanvas
+          style={{ height: '100%', width: '100%' }}
+        >
+          <ZoomControl position="bottomright" />
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
           {geoJsonData && (
             <GeoJSON
-              key={`${anoSelecionado}-${dados.length}`}
+              key="sp"
               data={geoJsonData}
               style={mapStyle}
               onEachFeature={(feature, layer) => {
                 const nomeFeature = normalizar(feature.properties.name);
-
                 layer.on({
                   click: (e) => {
                     L.DomEvent.stopPropagation(e);
-                    const dadosCidade = dados.find((d) => normalizar(d.municipio) === nomeFeature);
-                    if (dadosCidade) {
-                      setCidadeDestaque(dadosCidade);
-                    }
+                    const dadosCidade = dadosPorNomeRef.current.get(nomeFeature);
+                    if (dadosCidade) selecionarCidade(dadosCidade);
                   },
                 });
-
-                layer.bindTooltip(`<strong>${feature.properties.name}</strong>`, { sticky: true });
+                // No toque não existe "passar o mouse": o nome aparece na ficha
+                if (combina('(hover: hover)')) {
+                  layer.bindTooltip(`<strong>${feature.properties.name}</strong>`, { sticky: true });
+                }
               }}
             />
           )}
+          <AjustarMapa geo={geoJsonData} alvo={nomeDestaque} />
         </MapContainer>
-      </div>
+      </section>
 
-      {/* MODAL DE ZONAS ELEITORAIS */}
       {modalZonasAberto && cidadeDestaque && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 99999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '15px' }}>
-          <div style={{ backgroundColor: '#1e293b', width: '100%', maxWidth: '480px', borderRadius: '12px', border: '1px solid #334155', padding: '25px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
-            <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', color: '#facc15' }}>Zonas Eleitorais: {cidadeDestaque.municipio}</h2>
-            <p style={{ margin: '0 0 15px 0', fontSize: '12px', color: '#94a3b8' }}>Detalhamento do eleitorado por zona em 2026.</p>
-
-            <div style={{ maxHeight: '220px', overflowY: 'auto', marginBottom: '15px', border: '1px solid #334155', borderRadius: '6px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#0f172a', color: '#94a3b8', borderBottom: '1px solid #334155' }}>
-                    <th style={{ padding: '8px' }}>Zona Eleitoral</th>
-                    <th style={{ padding: '8px', textAlign: 'right' }}>Quantidade de Eleitores</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cidadeDestaque.eleitorado.zonas.length === 0 ? (
-                    <tr><td colSpan={2} style={{ padding: '12px', textAlign: 'center', color: '#94a3b8' }}>Sem registo de zonas para este município.</td></tr>
-                  ) : (
-                    cidadeDestaque.eleitorado.zonas.map((z, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #334155' }}>
-                        <td style={{ padding: '8px' }}>Zona {z.zona}</td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#4ade80', fontWeight: 'bold' }}>{z.quantidade}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <button onClick={() => setModalZonasAberto(false)} style={{ width: '100%', padding: '10px', backgroundColor: '#3b82f6', border: 'none', color: 'white', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>
-              Fechar Janela
-            </button>
-          </div>
-        </div>
+        <ModalZonas
+          municipio={cidadeDestaque.municipio}
+          zonas={cidadeDestaque.eleitorado.zonas}
+          onClose={() => setModalZonasAberto(false)}
+        />
       )}
 
-      {/* MODAL DE CRM DE LIDERANÇAS */}
       {crmAberto && cidadeDestaque && (
-        <PainelCRM
-          municipioId={cidadeDestaque.id}
-          municipioNome={cidadeDestaque.municipio}
-          onClose={() => setCrmAberto(false)}
-        />
+        <PainelCRM municipioId={cidadeDestaque.id} municipioNome={cidadeDestaque.municipio} onClose={() => setCrmAberto(false)} />
       )}
     </div>
   );

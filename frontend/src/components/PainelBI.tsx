@@ -3,13 +3,10 @@ import { getDobradas } from '../services/api';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import jsPDF from 'jspdf';
+import { FileText, Map as IconeMapa, Search } from 'lucide-react';
+import { ModalZonas, type ZonaEleitoral } from './ModalZonas';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
-
-interface ZonaEleitoral {
-  zona: string;
-  quantidade: string;
-}
 
 interface MunicipioBI {
   id: string;
@@ -38,10 +35,12 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
   const [modalZonasAberto, setModalZonasAberto] = useState<boolean>(false);
 
   useEffect(() => {
-    getDobradas(2026).then((res: any) => {
-      setDados(res);
-      setCidadeAtiva(null);
-    });
+    getDobradas(2026)
+      .then((res: any) => {
+        if (Array.isArray(res)) setDados(res);
+        setCidadeAtiva(null);
+      })
+      .catch((err: any) => console.error('Erro ao carregar metas:', err));
   }, []);
 
   const selecionarCidade = (nome: string) => {
@@ -55,7 +54,8 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
     setCidadeAtiva(null);
   };
 
-  const cidadesFiltradas = dados.filter((c: MunicipioBI) => c.municipio.toLowerCase().includes(termoBusca.toLowerCase()));
+  const semAcento = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const cidadesFiltradas = dados.filter((c: MunicipioBI) => semAcento(c.municipio).includes(semAcento(termoBusca)));
 
   const totalGeralVotos2026 = dados.reduce((acc, curr) => acc + curr.votosJefferson, 0);
   const totalGeralMetas2028 = dados.reduce((acc, curr) => acc + curr.projecao2028.metaVotos, 0);
@@ -76,7 +76,7 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
     pdf.setTextColor(0);
     pdf.setFontSize(11);
 
-    const alvosPrioritarios = dados
+    const alvosPrioritarios = [...dados]
       .sort((a, b) => b.projecao2028.metaVotos - a.projecao2028.metaVotos)
       .slice(0, 15);
 
@@ -112,208 +112,188 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
     }],
   };
 
+  const compacto = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => `${Number(ctx.parsed.y).toLocaleString('pt-BR')} votos`,
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(148,163,184,0.12)' } },
+      y: {
+        ticks: { color: '#94a3b8', font: { size: 11 }, maxTicksLimit: 6, callback: (v: any) => compacto.format(Number(v)) },
+        grid: { color: 'rgba(148,163,184,0.12)' },
+      },
+    },
+  };
+
   const formatCurrency = (val: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 
+  const valorKpi = (cidade: number, geral: number) => (cidadeAtiva ? cidade : geral).toLocaleString('pt-BR');
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'sans-serif', padding: '25px', overflowY: 'auto' }}>
-      
-      {/* HEADER E PESQUISA */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '20px', marginBottom: '25px' }}>
-        <div>
-          <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Growth Hacking & Estratégia Eleitoral</span>
-          <h1 style={{ margin: '4px 0 0 0', fontSize: '24px', color: '#ffffff' }}>
-            {cidadeAtiva ? `Planejamento 2028: ${cidadeAtiva.municipio}` : 'Painel de Metas & Projeções 2028 (São Paulo)'}
-          </h1>
+    <div className="bi">
+      {/* CABEÇALHO E PESQUISA */}
+      <div className="bi__cab">
+        <div className="bi__titulo">
+          <p className="rotulo-peq">Growth hacking e estratégia eleitoral</p>
+          <h1>{cidadeAtiva ? `Planejamento 2028: ${cidadeAtiva.municipio}` : 'Painel de Metas e Projeções 2028 (São Paulo)'}</h1>
         </div>
-        
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div style={{ position: 'relative', width: '280px' }}>
-            <input 
-              type="text" 
-              placeholder="🔍 Pesquisar município..." 
-              value={termoBusca}
-              onChange={(e) => setTermoBusca(e.target.value)}
-              style={{ width: '100%', padding: '12px 15px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', outline: 'none', fontSize: '14px' }}
-            />
+
+        <div className="bi__ferramentas">
+          <div className="bi__busca">
+            <label className="busca">
+              <Search size={16} />
+              <input
+                type="search"
+                enterKeyHint="search"
+                placeholder="Pesquisar município"
+                aria-label="Pesquisar município"
+                value={termoBusca}
+                onChange={(e) => {
+                  setTermoBusca(e.target.value);
+                  if (cidadeAtiva) setCidadeAtiva(null);
+                }}
+              />
+            </label>
             {termoBusca && cidadesFiltradas.length > 0 && !cidadeAtiva && (
-              <div style={{ position: 'absolute', top: '50px', left: 0, right: 0, backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', maxHeight: '200px', overflowY: 'auto', zIndex: 9999 }}>
-                {cidadesFiltradas.slice(0, 6).map((c: MunicipioBI) => (
-                  <div key={c.id} onClick={() => selecionarCidade(c.municipio)} style={{ padding: '10px 15px', cursor: 'pointer', borderBottom: '1px solid #334155', fontSize: '13px' }}>
-                    <strong>{c.municipio}</strong>
-                  </div>
+              <div className="sugestoes">
+                {cidadesFiltradas.slice(0, 8).map((c: MunicipioBI) => (
+                  <button key={c.id} onClick={() => selecionarCidade(c.municipio)}>
+                    {c.municipio}
+                  </button>
                 ))}
               </div>
             )}
           </div>
+
           {cidadeAtiva && (
-            <button onClick={limparSelecao} style={{ padding: '12px 15px', backgroundColor: '#334155', border: 'none', color: 'white', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer' }}>
-              Ver Geral SP
+            <button className="btn" onClick={limparSelecao}>
+              Ver geral SP
             </button>
           )}
-          
-          <button onClick={exportarRelatorioGeralPDF} style={{ padding: '12px 16px', backgroundColor: '#16a34a', border: 'none', color: 'white', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }} title="Gerar Relatório Geral de Alvos 2028">
-            📑 Relatório Geral PDF
+
+          <button className="btn btn--verde" onClick={exportarRelatorioGeralPDF} title="Gerar relatório geral de alvos 2028">
+            <FileText size={16} /> Relatório PDF
+          </button>
+
+          <button className="btn btn--contorno bi__voltar" onClick={onVoltarMapa}>
+            <IconeMapa size={16} /> Voltar ao mapa
           </button>
         </div>
-
-        <button onClick={onVoltarMapa} style={{ padding: '10px 20px', backgroundColor: '#1e293b', border: '1px solid #334155', color: '#facc15', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer' }}>
-          🗺️ Voltar ao Mapa Geográfico
-        </button>
       </div>
 
-      {/* QUADROS INFORMATIVOS / METAS 2028 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '25px' }}>
-        <div style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155' }}>
-          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase' }}>
-            {cidadeAtiva ? 'Votos Obtidos (2026)' : 'Votos Totais Base (2026)'}
+      {/* INDICADORES */}
+      <div className="kpis">
+        <div className="kpi">
+          <p className="rotulo-peq">{cidadeAtiva ? 'Votos obtidos (2026)' : 'Votos totais base (2026)'}</p>
+          <p className="kpi__valor num" style={{ color: 'var(--blue-l)' }}>
+            {valorKpi(cidadeAtiva?.votosJefferson ?? 0, totalGeralVotos2026)}
           </p>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '26px', color: '#60a5fa' }}>
-            {cidadeAtiva ? cidadeAtiva.votosJefferson.toLocaleString('pt-BR') : totalGeralVotos2026.toLocaleString('pt-BR')}
-          </h2>
         </div>
 
-        <div style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155', borderLeft: '4px solid #facc15' }}>
-          <p style={{ margin: 0, fontSize: '11px', color: '#facc15', textTransform: 'uppercase' }}>
-            {cidadeAtiva ? '🎯 Meta de Votos 2028' : '🎯 Meta Total Projetada 2028'}
+        <div className="kpi kpi--meta">
+          <p className="rotulo-peq">{cidadeAtiva ? '🎯 Meta de votos 2028' : '🎯 Meta total projetada 2028'}</p>
+          <p className="kpi__valor num" style={{ color: 'var(--accent)' }}>
+            {valorKpi(cidadeAtiva?.projecao2028.metaVotos ?? 0, totalGeralMetas2028)}
           </p>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '26px', color: '#facc15' }}>
-            {cidadeAtiva ? cidadeAtiva.projecao2028.metaVotos.toLocaleString('pt-BR') : totalGeralMetas2028.toLocaleString('pt-BR')}
-          </h2>
-        </div>
-        
-        <div 
-          onClick={() => cidadeAtiva && setModalZonasAberto(true)}
-          style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155', cursor: cidadeAtiva ? 'pointer' : 'default' }}
-        >
-          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase' }}>
-            {cidadeAtiva ? 'Eleitores 📋 (Ver Zonas)' : 'Total de Eleitores (Estado)'}
-          </p>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '26px', color: '#4ade80' }}>
-            {cidadeAtiva ? cidadeAtiva.eleitorado.totalEleitores.toLocaleString('pt-BR') : totalGeralEleitoresSP.toLocaleString('pt-BR')}
-          </h2>
         </div>
 
-        <div style={{ backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155' }}>
-          <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase' }}>Prioridade Estratégica</p>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '18px', color: '#cbd5e1', paddingTop: '4px' }}>
+        {cidadeAtiva ? (
+          <button className="kpi" onClick={() => setModalZonasAberto(true)}>
+            <p className="rotulo-peq">Eleitores 📋 (ver zonas)</p>
+            <p className="kpi__valor num" style={{ color: 'var(--green)' }}>
+              {cidadeAtiva.eleitorado.totalEleitores.toLocaleString('pt-BR')}
+            </p>
+          </button>
+        ) : (
+          <div className="kpi">
+            <p className="rotulo-peq">Total de eleitores (estado)</p>
+            <p className="kpi__valor num" style={{ color: 'var(--green)' }}>
+              {totalGeralEleitoresSP.toLocaleString('pt-BR')}
+            </p>
+          </div>
+        )}
+
+        <div className="kpi">
+          <p className="rotulo-peq">Prioridade estratégica</p>
+          <p className="kpi__valor kpi__valor--texto">
             {cidadeAtiva ? cidadeAtiva.projecao2028.prioridadeCampanha : 'Expansão Estadual'}
-          </h2>
+          </p>
         </div>
       </div>
 
       {/* GRÁFICO HISTÓRICO E ÁREAS DE EMENDAS */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', marginBottom: '25px' }}>
-        
-        <div style={{ backgroundColor: '#1e293b', padding: '25px', borderRadius: '12px', border: '1px solid #334155', display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ margin: '0 0 15px 0', fontSize: '15px', color: '#f8fafc' }}>
-            {cidadeAtiva ? `Evolução e Projeção em ${cidadeAtiva.municipio}` : 'Evolução Global (Estado de São Paulo)'}
-          </h3>
-          <div style={{ flex: 1, minHeight: '240px' }}>
-            <Line data={chartDataLine} options={{ responsive: true, maintainAspectRatio: false }} />
+      <div className="bi__grade">
+        <div className="painel">
+          <h3>{cidadeAtiva ? `Evolução em ${cidadeAtiva.municipio}` : 'Evolução global (Estado de São Paulo)'}</h3>
+          <div className="grafico">
+            <Line data={chartDataLine} options={chartOptions} />
           </div>
         </div>
 
-        <div style={{ backgroundColor: '#1e293b', padding: '25px', borderRadius: '12px', border: '1px solid #334155', display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ margin: '0 0 15px 0', fontSize: '15px', color: '#facc15' }}>
-            {cidadeAtiva ? 'Áreas Atendidas pelas Emendas' : 'Resumo das Áreas de Emendas (Estado)'}
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, overflowY: 'auto' }}>
+        <div className="painel">
+          <h3 style={{ color: 'var(--accent)' }}>{cidadeAtiva ? 'Áreas atendidas pelas emendas' : 'Resumo das áreas de emendas (estado)'}</h3>
+          <div className="emendas-lista">
             {cidadeAtiva ? (
               Object.keys(cidadeAtiva.emendas).length === 0 ? (
-                <p style={{ color: '#94a3b8', fontSize: '13px' }}>Sem registo de emendas para este município.</p>
+                <p className="texto-vazio">Sem registro de emendas para este município.</p>
               ) : (
-                Object.entries(cidadeAtiva.emendas).map(([cat, val]) => (
-                  <div key={cat} style={{ backgroundColor: '#0f172a', padding: '12px', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '5px' }}>
-                      <span style={{ fontWeight: 'bold', textTransform: 'uppercase' }}>{cat}</span>
-                      <strong style={{ color: '#facc15' }}>{formatCurrency(val as number)}</strong>
+                Object.entries(cidadeAtiva.emendas)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([cat, val]) => (
+                    <div key={cat} className="emenda-item">
+                      <div className="barra-cat__topo">
+                        <span style={{ fontWeight: 700, textTransform: 'uppercase' }}>{cat}</span>
+                        <strong className="num">{formatCurrency(val as number)}</strong>
+                      </div>
+                      <div className="barra">
+                        <div style={{ width: `${((val as number) / (cidadeAtiva.totalEmendas || 1)) * 100}%` }} />
+                      </div>
                     </div>
-                    <div style={{ width: '100%', height: '4px', backgroundColor: '#334155', borderRadius: '2px' }}>
-                      <div style={{ width: `${((val as number) / (cidadeAtiva.totalEmendas || 1)) * 100}%`, height: '100%', backgroundColor: '#facc15' }}></div>
-                    </div>
-                  </div>
-                ))
+                  ))
               )
             ) : (
-              <p style={{ color: '#94a3b8', fontSize: '13px' }}>Pesquise e selecione um município acima para visualizar as projeções detalhadas e emendas da cidade.</p>
+              <p className="texto-vazio">Pesquise e selecione um município acima para ver as projeções e as emendas da cidade.</p>
             )}
           </div>
         </div>
-
       </div>
 
-      {/* TOP 5 DA ÚLTIMA ELEIÇÃO */}
-      <div style={{ backgroundColor: '#1e293b', padding: '25px', borderRadius: '12px', border: '1px solid #334155' }}>
-        <h3 style={{ margin: '0 0 15px 0', fontSize: '15px', color: '#60a5fa' }}>
-          {cidadeAtiva ? `Top 5 Deputados Mais Votados em ${cidadeAtiva.municipio}` : 'Panorama Geral dos Principais Redutos (Estado)'}
+      {/* TOP 5 */}
+      <div className="painel">
+        <h3 style={{ color: 'var(--blue-l)' }}>
+          {cidadeAtiva ? `Top 5 deputados mais votados em ${cidadeAtiva.municipio}` : 'Panorama geral dos principais redutos (estado)'}
         </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '15px' }}>
-          <div style={{ backgroundColor: '#0f172a', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>1º Lugar</span>
-            <p style={{ margin: '5px 0 0 0', fontWeight: 'bold', fontSize: '14px' }}>Jefferson Campos</p>
-            <span style={{ fontSize: '12px', color: '#60a5fa' }}>{cidadeAtiva ? cidadeAtiva.votosJefferson.toLocaleString('pt-BR') + ' votos' : totalGeralVotos2026.toLocaleString('pt-BR') + ' votos (SP)'}</span>
+        <div className="top5">
+          <div className="top5__item top5__item--jc">
+            <span>1º lugar</span>
+            <p>Jefferson Campos</p>
+            <span className="num" style={{ color: 'var(--blue-l)' }}>
+              {cidadeAtiva ? cidadeAtiva.votosJefferson.toLocaleString('pt-BR') + ' votos' : totalGeralVotos2026.toLocaleString('pt-BR') + ' votos (SP)'}
+            </span>
           </div>
-          <div style={{ backgroundColor: '#0f172a', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #475569' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>2º Lugar</span>
-            <p style={{ margin: '5px 0 0 0', fontWeight: 'bold', fontSize: '14px' }}>Concorrente A</p>
-            <span style={{ fontSize: '12px', color: '#94a3b8' }}>Referência regional</span>
-          </div>
-          <div style={{ backgroundColor: '#0f172a', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #475569' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>3º Lugar</span>
-            <p style={{ margin: '5px 0 0 0', fontWeight: 'bold', fontSize: '14px' }}>Concorrente B</p>
-            <span style={{ fontSize: '12px', color: '#94a3b8' }}>Referência regional</span>
-          </div>
-          <div style={{ backgroundColor: '#0f172a', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #475569' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>4º Lugar</span>
-            <p style={{ margin: '5px 0 0 0', fontWeight: 'bold', fontSize: '14px' }}>Concorrente C</p>
-            <span style={{ fontSize: '12px', color: '#94a3b8' }}>Referência regional</span>
-          </div>
-          <div style={{ backgroundColor: '#0f172a', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #475569' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>5º Lugar</span>
-            <p style={{ margin: '5px 0 0 0', fontWeight: 'bold', fontSize: '14px' }}>Concorrente D</p>
-            <span style={{ fontSize: '12px', color: '#94a3b8' }}>Referência regional</span>
-          </div>
+          {['A', 'B', 'C', 'D'].map((letra, i) => (
+            <div key={letra} className="top5__item">
+              <span>{i + 2}º lugar</span>
+              <p>Concorrente {letra}</p>
+              <span>Referência regional</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* MODAL DE ZONAS ELEITORAIS */}
       {modalZonasAberto && cidadeAtiva && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 99999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <div style={{ backgroundColor: '#1e293b', width: '500px', borderRadius: '12px', border: '1px solid #334155', padding: '30px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
-            <h2 style={{ margin: '0 0 10px 0', fontSize: '20px', color: '#facc15' }}>Zonas Eleitorais: {cidadeAtiva.municipio}</h2>
-            <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#94a3b8' }}>Detalhamento do eleitorado por zona em 2026.</p>
-
-            <div style={{ maxHeight: '250px', overflowY: 'auto', marginBottom: '20px', border: '1px solid #334155', borderRadius: '8px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#0f172a', color: '#94a3b8', borderBottom: '1px solid #334155' }}>
-                    <th style={{ padding: '10px' }}>Zona Eleitoral</th>
-                    <th style={{ padding: '10px', textAlign: 'right' }}>Quantidade de Eleitores</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cidadeAtiva.eleitorado.zonas.length === 0 ? (
-                    <tr><td colSpan={2} style={{ padding: '15px', textAlign: 'center', color: '#94a3b8' }}>Sem registo de zonas para este município.</td></tr>
-                  ) : (
-                    cidadeAtiva.eleitorado.zonas.map((z: ZonaEleitoral, idx: number) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #334155' }}>
-                        <td style={{ padding: '10px' }}>Zona {z.zona}</td>
-                        <td style={{ padding: '10px', textAlign: 'right', color: '#4ade80', fontWeight: 'bold' }}>{z.quantidade}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <button onClick={() => setModalZonasAberto(false)} style={{ width: '100%', padding: '12px', backgroundColor: '#3b82f6', border: 'none', color: 'white', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer' }}>
-              Fechar Janela
-            </button>
-          </div>
-        </div>
+        <ModalZonas municipio={cidadeAtiva.municipio} zonas={cidadeAtiva.eleitorado.zonas} onClose={() => setModalZonasAberto(false)} />
       )}
-
     </div>
   );
 }
