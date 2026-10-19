@@ -40,12 +40,12 @@ export function MapaDobradas() {
 
   useEffect(() => {
     getDobradas(anoSelecionado)
-      .then(d => setDados(d))
-      .catch(err => console.error(err));
+      .then((res: any) => setDados(res))
+      .catch((err: any) => console.error(err));
 
     axios.get('https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-35-mun.json')
-      .then(res => setGeoJsonData(res.data))
-      .catch(err => console.error("Erro ao carregar GeoJSON", err));
+      .then((res: any) => setGeoJsonData(res.data))
+      .catch((err: any) => console.error("Erro ao carregar GeoJSON", err));
   }, [anoSelecionado]);
 
   const normalizar = (texto: string) => {

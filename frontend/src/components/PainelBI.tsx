@@ -38,7 +38,7 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
   const [modalZonasAberto, setModalZonasAberto] = useState<boolean>(false);
 
   useEffect(() => {
-    getDobradas(2026).then(res => {
+    getDobradas(2026).then((res: any) => {
       setDados(res);
       setCidadeAtiva(null);
     });
