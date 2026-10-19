@@ -2,32 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { getDobradas } from '../services/api';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import jsPDF from 'jspdf';
 import { FileText, Map as IconeMapa, Search } from 'lucide-react';
-import { ModalZonas, type ZonaEleitoral } from './ModalZonas';
+import { ModalZonas } from './ModalZonas';
+import { projecao, type Lideranca, type Municipio } from '../tipos';
+import { api } from '../services/api';
+import { rastrear } from '../services/carregamento';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-interface MunicipioBI {
-  id: string;
-  municipio: string;
-  votosJefferson: number;
-  totalEmendas: number;
-  totalDestinacoes: number;
-  emendas: Record<string, number>;
-  historicoJef: Record<number, number>;
-  historicoCandidatos?: Record<string, Record<number, number>>;
-  eleitorado: {
-    totalEleitores: number;
-    penetracao: string;
-    zonas: ZonaEleitoral[];
-  };
-  projecao2028: {
-    metaVotos: number;
-    potencialCrescimento: number;
-    prioridadeCampanha: string;
-  };
-}
+type MunicipioBI = Municipio;
 
 export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
   const [dados, setDados] = useState<MunicipioBI[]>([]);
@@ -84,46 +67,33 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
   const cidadesFiltradas = dados.filter((c: MunicipioBI) => semAcento(c.municipio).includes(semAcento(termoBusca)));
 
   const totalGeralVotos2026 = dados.reduce((acc, curr) => acc + curr.votosJefferson, 0);
-  const totalGeralMetas2028 = dados.reduce((acc, curr) => acc + curr.projecao2028.metaVotos, 0);
+  const totalGeralMetas2030 = dados.reduce((acc, curr) => acc + projecao(curr).metaVotos, 0);
  
   const totalGeralEleitoresSP = dados.reduce((acc, curr) => acc + curr.eleitorado.totalEleitores, 0);
 
-  // Função para exportar relatório consolidados de campo (Item D)
-  const exportarRelatorioGeralPDF = () => {
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(16);
-    pdf.text("RELATÓRIO ESTRATÉGICO DE CAMPO - METAS 2028", 14, 20);
-    pdf.setFontSize(10);
-    pdf.setTextColor(100);
-    pdf.text("Gabinete Deputado Federal Jefferson Campos - Plano de Ação Regional", 14, 26);
+  const [gerando, setGerando] = useState<'estado' | 'cidade' | null>(null);
 
-    let y = 35;
-    pdf.setTextColor(0);
-    pdf.setFontSize(11);
-
-    const alvosPrioritarios = [...dados]
-      .sort((a, b) => b.projecao2028.metaVotos - a.projecao2028.metaVotos)
-      .slice(0, 15);
-
-    alvosPrioritarios.forEach((c, idx) => {
-      if (y > 270) { pdf.addPage(); y = 20; }
-      pdf.setFont("helvetica", "bold");
-      pdf.text(`${idx + 1}. ${c.municipio}`, 14, y);
-      pdf.setFont("helvetica", "normal");
-      pdf.text(`Votos 2026: ${c.votosJefferson.toLocaleString('pt-BR')} | Meta 2028: ${c.projecao2028.metaVotos.toLocaleString('pt-BR')} | Eleitores: ${c.eleitorado.totalEleitores.toLocaleString('pt-BR')}`, 14, y + 5);
-      pdf.setTextColor(150, 100, 0);
-      pdf.text(`Prioridade: ${c.projecao2028.prioridadeCampanha}`, 14, y + 10);
-      pdf.setTextColor(0);
-      y += 16;
-    });
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(8);
-    pdf.setTextColor(140, 140, 140);
-    pdf.text(`API Cidadania 360 - gerado em ${new Date().toLocaleDateString('pt-BR')}`, 14, 290);
-
-    pdf.save("Relatorio_Estrategico_Campanha_2028.pdf");
+  // Relatório estratégico: do estado inteiro ou da cidade selecionada
+  const gerarRelatorio = async (tipo: 'estado' | 'cidade') => {
+    if (gerando || dados.length === 0) return;
+    setGerando(tipo);
+    try {
+      const modulo = await rastrear(import('../relatorios'));
+      if (tipo === 'cidade' && cidadeAtiva) {
+        const liderancas = await api
+          .get<Lideranca[]>(`/leaderships/${cidadeAtiva.id}`)
+          .then((r) => r.data)
+          .catch(() => null);
+        modulo.gerarRelatorioCidade(cidadeAtiva, dados, { variante: 'estrategico', liderancas });
+      } else {
+        modulo.gerarRelatorioEstado(dados);
+      }
+    } catch (err) {
+      console.error('Erro ao gerar relatório:', err);
+      window.alert('Não foi possível gerar o PDF. Tente de novo.');
+    } finally {
+      setGerando(null);
+    }
   };
 
   const anos = [2002, 2006, 2010, 2014, 2018, 2022, 2026];
@@ -205,7 +175,7 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
       <div className="bi__cab">
         <div className="bi__titulo">
           <p className="rotulo-peq">Growth hacking e estratégia eleitoral</p>
-          <h1>{cidadeAtiva ? `Planejamento 2028: ${cidadeAtiva.municipio}` : 'Painel de Metas e Projeções 2028 (São Paulo)'}</h1>
+          <h1>{cidadeAtiva ? `Planejamento 2030: ${cidadeAtiva.municipio}` : 'Painel de Metas e Projeções 2030 (São Paulo)'}</h1>
         </div>
 
         <div className="bi__ferramentas">
@@ -241,8 +211,13 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
             </button>
           )}
 
-          <button className="btn btn--verde" onClick={exportarRelatorioGeralPDF} title="Gerar relatório geral de alvos 2028">
-            <FileText size={16} /> Relatório PDF
+          {cidadeAtiva && (
+            <button className="btn btn--verde" onClick={() => gerarRelatorio('cidade')} disabled={!!gerando}>
+              <FileText size={16} /> {gerando === 'cidade' ? 'Gerando...' : `Relatório de ${cidadeAtiva.municipio}`}
+            </button>
+          )}
+          <button className={`btn ${cidadeAtiva ? 'btn--contorno-verde' : 'btn--verde'}`} onClick={() => gerarRelatorio('estado')} disabled={!!gerando || dados.length === 0}>
+            <FileText size={16} /> {gerando === 'estado' ? 'Gerando...' : 'Relatório do estado'}
           </button>
 
           <button className="btn btn--contorno bi__voltar" onClick={onVoltarMapa}>
@@ -270,9 +245,9 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
         </div>
 
         <div className="kpi kpi--meta">
-          <p className="rotulo-peq">{cidadeAtiva ? '🎯 Meta de votos 2028' : '🎯 Meta total projetada 2028'}</p>
+          <p className="rotulo-peq">{cidadeAtiva ? '🎯 Meta de votos 2030' : '🎯 Meta total projetada 2030'}</p>
           <p className="kpi__valor num" style={{ color: 'var(--accent)' }}>
-            {valorKpi(cidadeAtiva?.projecao2028.metaVotos ?? 0, totalGeralMetas2028)}
+            {valorKpi(cidadeAtiva ? projecao(cidadeAtiva).metaVotos : 0, totalGeralMetas2030)}
           </p>
         </div>
 
@@ -295,7 +270,7 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
         <div className="kpi">
           <p className="rotulo-peq">Prioridade estratégica</p>
           <p className="kpi__valor kpi__valor--texto">
-            {cidadeAtiva ? cidadeAtiva.projecao2028.prioridadeCampanha : 'Expansão Estadual'}
+            {cidadeAtiva ? projecao(cidadeAtiva).prioridadeCampanha : 'Expansão Estadual'}
           </p>
         </div>
       </div>

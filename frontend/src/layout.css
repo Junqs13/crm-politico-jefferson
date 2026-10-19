@@ -102,6 +102,7 @@ h1, h2, h3,
 .btn--primario { background: var(--blue); }
 .btn--verde { background: #16a34a; }
 .btn--contorno { background: var(--surface); border: 1px solid var(--line); color: var(--accent); }
+.btn--contorno-verde { background: var(--surface); border: 1.5px solid #16a34a; color: #4ade80; }
 .btn--bloco { width: 100%; }
 
 .btn-icone {

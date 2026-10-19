@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, GeoJSON, ZoomControl, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import axios from 'axios';
-import jsPDF from 'jspdf';
 import { List, X, ChevronDown, ChevronUp, FileText, Users, MessageCircle, Search, Layers } from 'lucide-react';
-import { getDobradas } from '../services/api';
+import { api, getDobradas } from '../services/api';
+import type { Lideranca } from '../tipos';
 import { rastrear } from '../services/carregamento';
 import { PainelCRM } from './PainelCRM';
 import { ModalZonas, type ZonaEleitoral } from './ModalZonas';
@@ -195,133 +195,25 @@ export function MapaDobradas() {
   const formatCurrency = (val: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 
-  const exportarFichaPDF = () => {
-    if (!cidadeDestaque) return;
-    const pdf = new jsPDF('p', 'mm', 'a4');
+  const [gerandoPdf, setGerandoPdf] = useState(false);
 
-    const corPrimaria = [15, 23, 42];
-    const corDestaque = [59, 130, 246];
-    const corAmarelo = [250, 204, 21];
-    const corCinzaFundo = [241, 245, 249];
-
-    pdf.setFillColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
-    pdf.rect(0, 0, 210, 35, 'F');
-
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(16);
-    pdf.text(`EXTRATO POLÍTICO MUNICIPAL - JEFFERSON CAMPOS`, 14, 15);
-    pdf.setFontSize(12);
-    pdf.setTextColor(corAmarelo[0], corAmarelo[1], corAmarelo[2]);
-    pdf.text(`${cidadeDestaque.municipio.toUpperCase()} - SP (Ciclo ${anoSelecionado})`, 14, 25);
-
-    let y = 45;
-    pdf.setFillColor(corCinzaFundo[0], corCinzaFundo[1], corCinzaFundo[2]);
-    pdf.roundedRect(14, y, 56, 22, 3, 3, 'F');
-    pdf.roundedRect(77, y, 56, 22, 3, 3, 'F');
-    pdf.roundedRect(140, y, 56, 22, 3, 3, 'F');
-
-    pdf.setFontSize(9);
-    pdf.setTextColor(100, 100, 100);
-    pdf.text(`VOTOS (${anoSelecionado})`, 18, y + 6);
-    pdf.text(`ELEITORADO TOTAL`, 81, y + 6);
-    pdf.text(`EMENDAS DESTINADAS`, 144, y + 6);
-
-    pdf.setFontSize(12);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(corDestaque[0], corDestaque[1], corDestaque[2]);
-    pdf.text(`${cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos`, 18, y + 16);
-    pdf.setTextColor(22, 163, 74);
-    pdf.text(`${cidadeDestaque.eleitorado.totalEleitores.toLocaleString('pt-BR')}`, 81, y + 16);
-    pdf.setTextColor(202, 138, 4);
-    pdf.text(`${formatCurrency(cidadeDestaque.totalEmendas)}`, 144, y + 16);
-
-    y += 32;
-    pdf.setFontSize(13);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
-    pdf.text(`Distribuição de Emendas por Área`, 14, y);
-
-    y += 6;
-    const emendasObj = Object.entries(cidadeDestaque.emendas);
-    if (emendasObj.length === 0) {
-      pdf.setFontSize(10);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setTextColor(120, 120, 120);
-      pdf.text(`Sem registo de emendas para este município.`, 14, y + 6);
-      y += 10;
-    } else {
-      emendasObj
-        .sort((a: any, b: any) => b[1] - a[1])
-        .forEach(([cat, val]) => {
-          const valorNum = val as number;
-          const percent = valorNum / (cidadeDestaque.totalEmendas || 1);
-
-          pdf.setFontSize(10);
-          pdf.setFont('helvetica', 'bold');
-          pdf.setTextColor(50, 50, 50);
-          pdf.text(`${cat.toUpperCase()}: ${formatCurrency(valorNum)}`, 14, y + 6);
-
-          pdf.setFillColor(226, 232, 240);
-          pdf.roundedRect(110, y + 2, 86, 4, 1, 1, 'F');
-          pdf.setFillColor(corDestaque[0], corDestaque[1], corDestaque[2]);
-          pdf.roundedRect(110, y + 2, Math.max(4, 86 * percent), 4, 1, 1, 'F');
-
-          y += 10;
-        });
+  // Dossiê da cidade: busca as lideranças e carrega o gerador de PDF só agora
+  const exportarFichaPDF = async () => {
+    if (!cidadeDestaque || gerandoPdf) return;
+    setGerandoPdf(true);
+    try {
+      const liderancas = await api
+        .get<Lideranca[]>(`/leaderships/${cidadeDestaque.id}`)
+        .then((r) => r.data)
+        .catch(() => null);
+      const { gerarRelatorioCidade } = await rastrear(import('../relatorios'));
+      gerarRelatorioCidade(cidadeDestaque, dados, { ano: anoSelecionado, variante: 'dossie', liderancas });
+    } catch (err) {
+      console.error('Erro ao gerar o dossiê:', err);
+      window.alert('Não foi possível gerar o PDF. Tente de novo.');
+    } finally {
+      setGerandoPdf(false);
     }
-
-    y += 10;
-    pdf.setFontSize(13);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
-    pdf.text(`Evolução Histórica por Candidato`, 14, y);
-
-    y += 6;
-    if (cidadeDestaque.historicoCandidatos) {
-      Object.entries(cidadeDestaque.historicoCandidatos).forEach(([candName, anosVotos]) => {
-        if (y > 270) {
-          pdf.addPage();
-          y = 20;
-        }
-
-        pdf.setFontSize(10);
-        pdf.setFont('helvetica', 'bold');
-        pdf.setTextColor(corDestaque[0], corDestaque[1], corDestaque[2]);
-        pdf.text(`${candName}`, 14, y + 5);
-        y += 7;
-
-        pdf.setFont('helvetica', 'normal');
-        let xOffset = 14;
-        anosDisponiveis.forEach((ano) => {
-          const v = anosVotos[ano];
-          if (v !== undefined && v > 0) {
-            if (xOffset > 170) {
-              xOffset = 14;
-              y += 7;
-            }
-            pdf.setFillColor(241, 245, 249);
-            pdf.roundedRect(xOffset, y, 26, 10, 2, 2, 'F');
-            pdf.setFontSize(8);
-            pdf.setTextColor(100, 100, 100);
-            pdf.text(`${ano}`, xOffset + 2, y + 4);
-            pdf.setFont('helvetica', 'bold');
-            pdf.setFontSize(9);
-            pdf.setTextColor(15, 23, 42);
-            pdf.text(`${v.toLocaleString('pt-BR')}`, xOffset + 2, y + 8.5);
-            xOffset += 28;
-          }
-        });
-        y += 12;
-      });
-    }
-
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(8);
-    pdf.setTextColor(140, 140, 140);
-    pdf.text(`API Cidadania 360 - gerado em ${new Date().toLocaleDateString('pt-BR')}`, 14, 290);
-
-    pdf.save(`Dossie_Politico_${cidadeDestaque.municipio}.pdf`);
   };
 
   const compartilharWhatsApp = () => {
@@ -647,8 +539,8 @@ export function MapaDobradas() {
             </div>
 
             <div className="ficha__acoes">
-              <button className="btn acao acao--pdf" onClick={exportarFichaPDF}>
-                <FileText size={16} /> PDF
+              <button className="btn acao acao--pdf" onClick={exportarFichaPDF} disabled={gerandoPdf}>
+                <FileText size={16} /> {gerandoPdf ? 'Gerando...' : 'PDF'}
               </button>
               <button className="btn acao acao--crm" onClick={() => setCrmAberto(true)}>
                 <Users size={16} /> Lideranças

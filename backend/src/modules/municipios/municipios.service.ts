@@ -5,6 +5,9 @@ import Papa from 'papaparse';
 
 const prisma = new PrismaClient();
 
+// Crescimento sobre os votos de 2026 usado para a meta da eleição de 2030
+const CRESCIMENTO_META_2030 = 0.2;
+
 export class MunicipiosService {
   async obterMapaDobradas(ano: number) {
     const eleitoresPorCidade: Record<string, number> = {};
@@ -98,7 +101,8 @@ export class MunicipiosService {
       const penetracao = penetracaoNum.toFixed(2) + '%';
 
       const votos2026 = historicoJef[2026] || votosJefferson;
-      const meta2028 = Math.round(votos2026 * 1.2);
+      // Próxima eleição federal: 2030. Meta = votos de 2026 + 20%
+      const meta2030 = Math.round(votos2026 * (1 + CRESCIMENTO_META_2030));
       const potencialRestante = Math.max(0, Math.round(totalEleitores * 0.15) - votos2026);
 
       return {
@@ -116,8 +120,9 @@ export class MunicipiosService {
           penetracao,
           zonas: zonasPorCidade[nomeLimpo] || [],
         },
-        projecao2028: {
-          metaVotos: meta2028,
+        projecao2030: {
+          metaVotos: meta2030,
+          crescimentoMetaPct: Math.round(CRESCIMENTO_META_2030 * 100),
           potencialCrescimento: potencialRestante,
           prioridadeCampanha:
             penetracaoNum < 2 && totalEleitores > 20000

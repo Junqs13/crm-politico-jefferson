@@ -51,7 +51,7 @@ export function App() {
               <IconeMapa size={16} /> Mapa
             </button>
             <button className={`btn ${paginaAtual === 'bi' ? 'is-ativo' : ''}`} onClick={() => setPaginaAtual('bi')}>
-              <ChartColumn size={16} /> Metas 2028
+              <ChartColumn size={16} /> Metas 2030
             </button>
           </nav>
 
@@ -73,7 +73,7 @@ export function App() {
         </button>
         <button className={`abas__btn ${paginaAtual === 'bi' ? 'is-ativo' : ''}`} onClick={() => setPaginaAtual('bi')}>
           <ChartColumn size={22} />
-          Metas 2028
+          Metas 2030
         </button>
       </nav>
     </div>
