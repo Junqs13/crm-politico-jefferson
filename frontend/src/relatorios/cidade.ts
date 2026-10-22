@@ -1,5 +1,6 @@
 import { ANOS_ELEICAO, ANO_BASE, ANO_META, projecao, votosJefNoAno, type Lideranca, type Municipio } from '../tipos';
 import { COR, CORES_SERIE, Relatorio, fmtInt, fmtMoeda, fmtMoedaCurta, fmtPct, fmtSinal, nomeArquivo, type Cartao, type RGB } from './base';
+import { pontoPosicao, secaoAliadosCidade, secaoRankingCidade, secaoZonasCidade, notaFonte, type TseCidade } from './tse';
 import { ANO_ANTERIOR, cidadesParecidas, penetracao, posicaoNoEstado, resumoEstado, textoArea, textoPrioridade, variacao } from './analise';
 
 /*
@@ -12,6 +13,7 @@ export interface OpcoesCidade {
   ano?: number;
   variante?: 'dossie' | 'estrategico';
   liderancas?: Lideranca[] | null;
+  tse?: TseCidade | null;
 }
 
 const ALINHAMENTO: Record<string, string> = { ALTO: 'Alto (fiel)', MEDIO: 'Médio', 'EM CONQUISTA': 'Em conquista' };
@@ -125,6 +127,8 @@ export function gerarRelatorioCidade(c: Municipio, todos: Municipio[], opcoes: O
         : { texto: 'Nenhuma liderança cadastrada no CRM para este município.', cor: COR.cinza }
     );
   }
+  const posicaoTse = opcoes.tse ? pontoPosicao(opcoes.tse, c.municipio) : null;
+  if (posicaoTse) pontos.unshift({ texto: posicaoTse, cor: COR.amarelo });
   r.pontos(pontos);
 
   /* ---------- evolução ---------- */
@@ -134,6 +138,9 @@ export function gerarRelatorioCidade(c: Municipio, todos: Municipio[], opcoes: O
     ANOS_ELEICAO.map((a) => votosJefNoAno(c, a)),
     { destaque: ANOS_ELEICAO.indexOf(ano) }
   );
+
+  /* ---------- resultado oficial de 2026 ---------- */
+  if (opcoes.tse) secaoRankingCidade(r, opcoes.tse, c.municipio);
 
   /* ---------- candidatos ---------- */
   const candidatos = Object.entries(c.historicoCandidatos || {}).filter(([, porAno]) => Object.values(porAno).some((v) => v > 0));
@@ -216,6 +223,11 @@ export function gerarRelatorioCidade(c: Municipio, todos: Municipio[], opcoes: O
     r.aviso('Sem registro de zonas eleitorais para este município no arquivo de eleitorado.');
   }
 
+  if (opcoes.tse) {
+    secaoZonasCidade(r, opcoes.tse, c.municipio);
+    secaoAliadosCidade(r, opcoes.tse, c.municipio);
+  }
+
   /* ---------- lideranças ---------- */
   r.secao('Lideranças cadastradas no CRM');
   if (opcoes.liderancas === null || opcoes.liderancas === undefined) {
@@ -252,6 +264,8 @@ export function gerarRelatorioCidade(c: Municipio, todos: Municipio[], opcoes: O
   r.nota(
     `Fontes: resultados eleitorais e emendas cadastrados na API Cidadania 360; eleitorado por zona do TSE (${ANO_BASE}). A meta de ${ANO_META} considera ${crescimento}% de crescimento sobre os votos de ${ANO_BASE}. Penetração = votos ÷ eleitorado de ${ANO_BASE}.`
   );
+
+  if (opcoes.tse) notaFonte(r);
 
   const prefixo = variante === 'estrategico' ? `Plano_${ANO_META}` : 'Dossie';
   r.salvar(`${prefixo}_${nomeArquivo(c.municipio)}_${ano}.pdf`);

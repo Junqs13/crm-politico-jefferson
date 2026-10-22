@@ -1283,3 +1283,177 @@ select.campo {
   .login__marca h1 { font-size: 30px; }
   .codigo__casa { height: 56px; }
 }
+
+/* ==========================================================
+   Votação 2026: abas da ficha, rankings, zonas, aliados, busca
+   ========================================================== */
+.ficha__abas {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ficha__abas::-webkit-scrollbar { display: none; }
+.ficha__abas button {
+  flex: none;
+  min-height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ficha__abas button.is-ativo { color: #fff; border-bottom-color: var(--accent); }
+.ficha.is-min .ficha__abas { display: none; }
+.ficha__corpo.ficha__corpo--lista { display: block; }
+.ficha__variacao.is-cand { color: #c4b5fd; }
+
+.segmentado {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.segmentado button {
+  min-height: 36px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+}
+.segmentado button.is-ativo { background: var(--surface-2); color: #fff; }
+
+.vt-nota { margin: 0 0 10px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.vt-bloco { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.vt-bloco h4 { margin: 0 0 6px; font-family: var(--font-num); font-size: 15px; font-weight: 600; color: #fff; }
+.vt-lista { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.vt-linha {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.vt-linha.is-jc { border-color: var(--accent); background: rgba(245, 197, 24, 0.08); }
+.vt-linha.is-jc .barra > div { background: var(--accent); }
+.vt-linha:not(.is-jc) .barra > div { background: var(--blue-l); }
+.vt-pos { flex: none; width: 30px; padding-top: 1px; font-family: var(--font-num); font-size: 16px; font-weight: 700; color: var(--muted); }
+.vt-linha.is-jc .vt-pos { color: var(--accent); }
+.vt-info { flex: 1; min-width: 0; }
+.vt-topo, .vt-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.vt-topo strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vt-votos { flex: none; font-family: var(--font-num); font-size: 15px; font-weight: 600; }
+.vt-sub { margin: 1px 0 5px; font-size: 12px; color: var(--muted); }
+.vt-eleito { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: rgba(74, 222, 128, 0.14); color: var(--green); font-style: normal; font-size: 11px; font-weight: 600; }
+.vt-suplente { color: var(--muted); }
+.vt-reticencias { text-align: center; color: var(--muted); line-height: 1; }
+.vt-mais { width: 100%; margin-top: 8px; min-height: 38px; font-size: 13px; }
+.vt-lista--compacta .vt-linha { padding: 7px 10px; }
+
+.vt-zonas { display: flex; flex-direction: column; gap: 8px; }
+.vt-zona { padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
+.vt-zona__cab, .vt-zona__jc { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.vt-zona__cab span { color: var(--muted); font-size: 12px; }
+.vt-zona__jc { margin: 4px 0 5px; color: var(--text-2); }
+.vt-zona__jc span:first-child { color: var(--accent); font-weight: 600; }
+.vt-zona .barra > div { background: var(--accent); }
+.vt-zona__lider { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+.vt-aliados { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.vt-aliados li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.vt-aliados li > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vt-aliados strong { font-size: 14px; }
+.vt-aliados li > div span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.vt-aliados__votos { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-family: var(--font-num); font-weight: 600; }
+.vt-aliados__votos small { font-family: var(--font); font-weight: 500; font-size: 11.5px; color: var(--muted); }
+.vt-chip { flex: none; font-size: 12px; font-weight: 600; }
+
+/* Busca de candidato (modo Candidato do mapa) */
+.modo-cand { margin-bottom: 10px; }
+.modo-cand__atual { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; padding: 8px 10px; background: var(--bg); border-left: 3px solid #a78bfa; border-radius: 6px; }
+.modo-cand__atual strong { font-size: 13.5px; color: #fff; }
+.modo-cand__atual span { font-size: 11.5px; color: var(--muted); }
+.modo-cand__status { color: #c4b5fd !important; }
+.busca-cand { position: relative; }
+.busca-cand .busca input { height: 40px; background: var(--bg); }
+.busca-cand__lista {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.7);
+}
+.busca-cand__lista button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: #fff;
+  text-align: left;
+}
+.busca-cand__lista button:hover, .busca-cand__lista button:focus-visible { background: var(--surface-2); }
+.busca-cand__lista button strong { font-size: 13.5px; }
+.busca-cand__lista button span { font-size: 11.5px; color: var(--muted); }
+.busca-cand__vazio { padding: 10px; font-size: 12.5px; color: var(--muted); }
+.legenda:has(.modo-cand) { max-width: 300px; }
+.legenda:has(.modo-cand) .legenda__itens { min-width: 270px; }
+.modo-cor { grid-template-columns: repeat(2, 1fr); }
+
+/* Painel Metas 2030 com dados do TSE */
+.bi__grade--tse { align-items: start; }
+.vt-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.vt-filtros .segmentado { margin-bottom: 0; flex: 1 1 200px; }
+.vt-filtro-partido { flex: 1 1 160px; height: 42px; background: var(--bg); }
+.vt-aliado-estado { align-items: flex-start !important; }
+.vt-forte { color: var(--text-2) !important; }
+.vt-conc .vt-sub span:last-child { color: var(--text-2); }
+.barra--perda > div { background: #fb923c !important; }
+.vt-conc__onde { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+/* Celular deitado: a ficha inteira rola, com os botões presos embaixo */
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 1023px) {
+  .ficha { display: block; overflow-y: auto; overscroll-behavior: contain; }
+  .ficha__cab .rotulo-peq { display: none; }
+  .ficha__corpo { overflow: visible; }
+  .ficha__abas { position: sticky; top: 0; z-index: 2; background: var(--bg); }
+  .ficha__acoes { position: sticky; bottom: 0; z-index: 2; }
+}

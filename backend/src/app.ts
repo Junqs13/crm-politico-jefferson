@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import municipiosRoutes from './modules/municipios/municipios.routes.js';
+import votacaoRoutes from './modules/votacao/votacao.routes.js';
 import { LeadershipsService, limparDados, validar, type DadosLideranca } from './modules/leaderships/leaderships.service.js';
 
 const app = express();
@@ -32,6 +33,9 @@ app.get('/api/v1/health', (req: Request, res: Response) => {
 
 // Rotas de Municípios
 app.use('/api/municipios', municipiosRoutes);
+
+// Resultado oficial de 2026 (TSE), por cidade e zona
+app.use('/api/votacao/2026', votacaoRoutes);
 app.use('/municipios', municipiosRoutes);
 
 // Controladores de Lideranças com tratamento estrito de tipos (evita erro de string | string[])

@@ -8,6 +8,12 @@ import type { Lideranca } from '../tipos';
 import { rastrear } from '../services/carregamento';
 import { PainelCRM } from './PainelCRM';
 import { ModalZonas, type ZonaEleitoral } from './ModalZonas';
+import { RankingCidade } from './votacao/RankingCidade';
+import { ZonasCidade } from './votacao/ZonasCidade';
+import { AliadosCidade } from './votacao/AliadosCidade';
+import { BuscaCandidato } from './votacao/BuscaCandidato';
+import { useDados } from './votacao/useDados';
+import { votacao, nomeProprio, textoSituacao, carregarTseCidade, type CandidatoResumo } from '../services/votacao';
 
 interface MunicipioDado {
   id: string;
@@ -39,7 +45,15 @@ const normalizar = (texto: string) => {
 
 const combina = (consulta: string) => typeof window !== 'undefined' && !!window.matchMedia?.(consulta).matches;
 
-type ModoCor = 'votos' | 'penetracao' | 'comparar';
+type ModoCor = 'votos' | 'penetracao' | 'comparar' | 'candidato';
+type AbaFicha = 'resumo' | 'ranking' | 'zonas' | 'aliados';
+
+const ABAS_FICHA: [AbaFicha, string][] = [
+  ['resumo', 'Resumo'],
+  ['ranking', 'Ranking 2026'],
+  ['zonas', 'Zonas'],
+  ['aliados', 'Aliados'],
+];
 
 const SEM_DADO = '#334155';
 
@@ -64,6 +78,14 @@ const FAIXAS: Record<ModoCor, { min: number; cor: string; texto: string }[]> = {
     { min: -0.0001, cor: '#64748b', texto: 'Sem variação' },
     { min: -25, cor: '#fdba74', texto: 'Caiu até 25%' },
     { min: -Infinity, cor: '#ea580c', texto: 'Caiu 25% ou mais' },
+  ],
+  // % dos votos válidos do cargo na cidade, em 2026
+  candidato: [
+    { min: 15, cor: '#4c1d95', texto: '15% ou mais dos votos da cidade' },
+    { min: 5, cor: '#7c3aed', texto: '5% a 15%' },
+    { min: 2, cor: '#a78bfa', texto: '2% a 5%' },
+    { min: 0.5, cor: '#c4b5fd', texto: '0,5% a 2%' },
+    { min: -Infinity, cor: '#ede9fe', texto: 'Menos de 0,5%' },
   ],
 };
 
@@ -123,6 +145,8 @@ export function MapaDobradas() {
   const [legendaAberta, setLegendaAberta] = useState(() => combina('(min-width: 768px)'));
   const [modoCor, setModoCor] = useState<ModoCor>('votos');
   const [anoComparar, setAnoComparar] = useState<number>(2022);
+  const [abaFicha, setAbaFicha] = useState<AbaFicha>('resumo');
+  const [candidatoMapa, setCandidatoMapa] = useState<CandidatoResumo | null>(null);
 
   useEffect(() => {
     let ativo = true;
@@ -206,8 +230,8 @@ export function MapaDobradas() {
         .get<Lideranca[]>(`/leaderships/${cidadeDestaque.id}`)
         .then((r) => r.data)
         .catch(() => null);
-      const { gerarRelatorioCidade } = await rastrear(import('../relatorios'));
-      gerarRelatorioCidade(cidadeDestaque, dados, { ano: anoSelecionado, variante: 'dossie', liderancas });
+      const [{ gerarRelatorioCidade }, tse] = await Promise.all([rastrear(import('../relatorios')), carregarTseCidade(cidadeDestaque.codigoIbge)]);
+      gerarRelatorioCidade(cidadeDestaque, dados, { ano: anoSelecionado, variante: 'dossie', liderancas, tse });
     } catch (err) {
       console.error('Erro ao gerar o dossiê:', err);
       window.alert('Não foi possível gerar o PDF. Tente de novo.');
@@ -240,6 +264,37 @@ export function MapaDobradas() {
 
   const nomeDestaque = cidadeDestaque ? normalizar(cidadeDestaque.municipio) : null;
 
+  // Tela 2: modo "Candidato". Começa com Jefferson Campos e troca pela busca.
+  const escolherModo = (m: ModoCor) => {
+    setModoCor(m);
+    if (m === 'candidato' && !candidatoMapa) {
+      votacao
+        .candidatos('2274', 'federal', 1)
+        .then((r) => r[0] && setCandidatoMapa((atual) => atual ?? r[0]))
+        .catch(() => {});
+    }
+  };
+  const votosCand = useDados(candidatoMapa ? `cand-${candidatoMapa.id}` : 'cand-nenhum', () =>
+    candidatoMapa ? votacao.votosDoCandidato(candidatoMapa.id) : Promise.resolve(null)
+  );
+  const votosCandPorIbge = useMemo(() => {
+    const mapa = new Map<string, { votos: number; pct: number; posicao: number }>();
+    votosCand.dados?.municipios.forEach((m) => mapa.set(m.ibge, m));
+    return mapa;
+  }, [votosCand.dados]);
+  const modoCandidato = modoCor === 'candidato' && !!candidatoMapa;
+
+  // No modo candidato a lista segue os votos dele, e o número ao lado é a posição da cidade para ele
+  const ordemCandidato = useMemo(() => {
+    const ordem = [...dados].sort((a, b) => (votosCandPorIbge.get(b.codigoIbge)?.votos ?? 0) - (votosCandPorIbge.get(a.codigoIbge)?.votos ?? 0));
+    return new Map(ordem.map((c, i) => [c.id, i + 1]));
+  }, [dados, votosCandPorIbge]);
+  const listaVisivel = modoCandidato
+    ? [...cidadesFiltradas].sort((a, b) => (ordemCandidato.get(a.id) ?? 0) - (ordemCandidato.get(b.id) ?? 0))
+    : cidadesFiltradas;
+  const posicaoNaLista = (c: MunicipioDado) => (modoCandidato ? (votosCandPorIbge.has(c.codigoIbge) ? ordemCandidato.get(c.id) : null) : posicao.get(c.id));
+  const votoCandDestaque = modoCandidato && cidadeDestaque ? votosCandPorIbge.get(cidadeDestaque.codigoIbge) : undefined;
+
   // Ano de comparação: nunca o mesmo ano da base; se coincidir, usa o ciclo anterior
   const idxBase = anosDisponiveis.indexOf(anoSelecionado);
   const cicloAnterior = idxBase > 0 ? anosDisponiveis[idxBase - 1] : anosDisponiveis[1];
@@ -261,10 +316,15 @@ export function MapaDobradas() {
     if (!c) return null;
     if (modoCor === 'votos') return c.votosJefferson > 0 ? c.votosJefferson : null;
     if (modoCor === 'penetracao') return penetracaoDe(c);
+    if (modoCor === 'candidato') return votosCandPorIbge.get(c.codigoIbge)?.pct ?? null;
     return variacaoDe(c)?.pct ?? null;
   };
 
   const detalheLista = (c: MunicipioDado) => {
+    if (modoCandidato) {
+      const v = votosCandPorIbge.get(c.codigoIbge);
+      return v ? `${v.votos.toLocaleString('pt-BR')} votos, ${formatarPct(v.pct)} da cidade` : 'Sem votos';
+    }
     const votos = `${c.votosJefferson.toLocaleString('pt-BR')} votos`;
     if (modoCor === 'penetracao') {
       const p = penetracaoDe(c);
@@ -313,6 +373,8 @@ export function MapaDobradas() {
     ? `Carregando votos de ${anoSelecionado}...`
     : erroCarga
     ? 'O servidor não respondeu.'
+    : modoCandidato
+    ? `${cidadesFiltradas.length} municípios, votos de ${nomeProprio(candidatoMapa!.nomeUrna)} em 2026`
     : `${cidadesFiltradas.length} municípios, votos de ${anoSelecionado}`;
 
   const avisoErro = erroCarga && !carregando && (
@@ -365,15 +427,18 @@ export function MapaDobradas() {
               Nenhum município com "{pesquisa}". Confira a grafia ou apague a busca.
             </p>
           )}
-          {cidadesFiltradas.map((c) => (
-            <button key={c.id} className={`cidade ${cidadeDestaque?.id === c.id ? 'is-ativo' : ''}`} onClick={() => selecionarCidade(c)}>
-              <span>
-                <span className="cidade__nome">{c.municipio}</span>
-                <span className="cidade__votos num">{detalheLista(c)}</span>
-              </span>
-              <span className="cidade__pos num">{posicao.get(c.id)}º</span>
-            </button>
-          ))}
+          {listaVisivel.map((c) => {
+            const pos = posicaoNaLista(c);
+            return (
+              <button key={c.id} className={`cidade ${cidadeDestaque?.id === c.id ? 'is-ativo' : ''}`} onClick={() => selecionarCidade(c)}>
+                <span>
+                  <span className="cidade__nome">{c.municipio}</span>
+                  <span className="cidade__votos num">{detalheLista(c)}</span>
+                </span>
+                <span className="cidade__pos num">{pos ? `${pos}º` : '-'}</span>
+              </button>
+            );
+          })}
         </div>
       </aside>
 
@@ -391,7 +456,16 @@ export function MapaDobradas() {
         <div className="legenda">
           <button className="legenda__titulo" onClick={() => setLegendaAberta((v) => !v)} aria-expanded={legendaAberta}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Layers size={14} /> Cores: {modoCor === 'votos' ? 'votos' : modoCor === 'penetracao' ? 'penetração' : `${anoSelecionado} x ${anoComp}`}
+              <Layers size={14} /> Cores:{' '}
+              {modoCor === 'votos'
+                ? 'votos'
+                : modoCor === 'penetracao'
+                ? 'penetração'
+                : modoCor === 'candidato'
+                ? candidatoMapa
+                  ? nomeProprio(candidatoMapa.nomeUrna)
+                  : 'candidato'
+                : `${anoSelecionado} x ${anoComp}`}
             </span>
             {legendaAberta ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -403,9 +477,10 @@ export function MapaDobradas() {
                     ['votos', 'Votos'],
                     ['penetracao', 'Penetração'],
                     ['comparar', 'Comparar'],
+                    ['candidato', 'Candidato'],
                   ] as [ModoCor, string][]
                 ).map(([m, rotulo]) => (
-                  <button key={m} className={modoCor === m ? 'is-ativo' : ''} aria-pressed={modoCor === m} onClick={() => setModoCor(m)}>
+                  <button key={m} className={modoCor === m ? 'is-ativo' : ''} aria-pressed={modoCor === m} onClick={() => escolherModo(m)}>
                     {rotulo}
                   </button>
                 ))}
@@ -426,6 +501,32 @@ export function MapaDobradas() {
                 </label>
               )}
 
+              {modoCor === 'candidato' && (
+                <div className="modo-cand">
+                  {candidatoMapa && (
+                    <div className="modo-cand__atual">
+                      <strong>{nomeProprio(candidatoMapa.nomeUrna)}</strong>
+                      <span>
+                        {candidatoMapa.partido} · {candidatoMapa.numero} · {candidatoMapa.votos.toLocaleString('pt-BR')} votos · {textoSituacao(candidatoMapa.situacao)}
+                      </span>
+                      {votosCand.carregando && <span className="modo-cand__status">Carregando votos por cidade...</span>}
+                      {votosCand.erro && (
+                        <button className="btn" onClick={votosCand.tentarDeNovo}>
+                          Tentar de novo
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <BuscaCandidato
+                    aoEscolher={(c) => {
+                      setCandidatoMapa(c);
+                      // no celular a legenda cobre o mapa: fecha para mostrar o resultado
+                      if (combina('(max-width: 767px)')) setLegendaAberta(false);
+                    }}
+                  />
+                </div>
+              )}
+
               {FAIXAS[modoCor].map((l) => (
                 <div key={l.cor} className="legenda__item">
                   <span className="legenda__cor" style={{ backgroundColor: l.cor }} />
@@ -438,6 +539,7 @@ export function MapaDobradas() {
               </div>
               {modoCor === 'penetracao' && <p className="legenda__nota">Votos do ano escolhido sobre o eleitorado de 2026.</p>}
               {modoCor === 'comparar' && <p className="legenda__nota">Votos de Jefferson Campos em cada ano.</p>}
+              {modoCor === 'candidato' && <p className="legenda__nota">Resultado oficial do TSE de 2026. Vale para qualquer cargo.</p>}
             </div>
           )}
         </div>
@@ -455,6 +557,13 @@ export function MapaDobradas() {
                 <p className="ficha__resumo num">
                   {cidadeDestaque.votosJefferson.toLocaleString('pt-BR')} votos em {anoSelecionado}
                 </p>
+                {votoCandDestaque !== undefined || (modoCandidato && cidadeDestaque) ? (
+                  <p className="ficha__variacao num is-cand">
+                    {votoCandDestaque
+                      ? `${nomeProprio(candidatoMapa!.nomeUrna)}: ${votoCandDestaque.votos.toLocaleString('pt-BR')} votos, ${formatarPct(votoCandDestaque.pct)}, ${votoCandDestaque.posicao}º na cidade`
+                      : `${nomeProprio(candidatoMapa!.nomeUrna)} não teve votos aqui`}
+                  </p>
+                ) : null}
                 {variacaoDestaque && (
                   <p className={`ficha__variacao num ${variacaoDestaque.dif > 0 ? 'is-alta' : variacaoDestaque.dif < 0 ? 'is-baixa' : ''}`}>
                     {variacaoDestaque.antes
@@ -477,7 +586,20 @@ export function MapaDobradas() {
               </div>
             </div>
 
-            <div className="ficha__corpo">
+            <div className="ficha__abas" role="tablist" aria-label="Seções da ficha">
+              {ABAS_FICHA.map(([aba, rotulo]) => (
+                <button key={aba} role="tab" aria-selected={abaFicha === aba} className={abaFicha === aba ? 'is-ativo' : ''} onClick={() => setAbaFicha(aba)}>
+                  {rotulo}
+                </button>
+              ))}
+            </div>
+
+            <div className={`ficha__corpo ${abaFicha !== 'resumo' ? 'ficha__corpo--lista' : ''}`} role="tabpanel">
+              {abaFicha === 'ranking' && <RankingCidade key={cidadeDestaque.codigoIbge} ibge={cidadeDestaque.codigoIbge} nome={cidadeDestaque.municipio} />}
+              {abaFicha === 'zonas' && <ZonasCidade ibge={cidadeDestaque.codigoIbge} nome={cidadeDestaque.municipio} />}
+              {abaFicha === 'aliados' && <AliadosCidade ibge={cidadeDestaque.codigoIbge} municipioId={cidadeDestaque.id} nome={cidadeDestaque.municipio} />}
+              {abaFicha === 'resumo' && (
+              <>
               <button className="cartao cartao--botao" onClick={() => setModalZonasAberto(true)} title="Ver o eleitorado por zona eleitoral">
                 <div className="cartao__linha">
                   <div>
@@ -536,6 +658,8 @@ export function MapaDobradas() {
                     </div>
                   ))}
               </div>
+              </>
+              )}
             </div>
 
             <div className="ficha__acoes">

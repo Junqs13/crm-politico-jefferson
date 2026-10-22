@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getDobradas } from '../services/api';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { FileText, Map as IconeMapa, Search } from 'lucide-react';
 import { ModalZonas } from './ModalZonas';
+import { RankingCidade } from './votacao/RankingCidade';
+import { ZonasCidade } from './votacao/ZonasCidade';
+import { AliadosCidade } from './votacao/AliadosCidade';
+import { ConcorrenciaPartido } from './votacao/ConcorrenciaPartido';
+import { AliadosEstado } from './votacao/AliadosEstado';
+import { carregarTseCidade, carregarTseEstado } from '../services/votacao';
 import { projecao, type Lideranca, type Municipio } from '../tipos';
 import { api } from '../services/api';
 import { rastrear } from '../services/carregamento';
@@ -84,9 +90,10 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
           .get<Lideranca[]>(`/leaderships/${cidadeAtiva.id}`)
           .then((r) => r.data)
           .catch(() => null);
-        modulo.gerarRelatorioCidade(cidadeAtiva, dados, { variante: 'estrategico', liderancas });
+        const tse = await carregarTseCidade(cidadeAtiva.codigoIbge);
+        modulo.gerarRelatorioCidade(cidadeAtiva, dados, { variante: 'estrategico', liderancas, tse });
       } else {
-        modulo.gerarRelatorioEstado(dados);
+        modulo.gerarRelatorioEstado(dados, await carregarTseEstado());
       }
     } catch (err) {
       console.error('Erro ao gerar relatório:', err);
@@ -137,33 +144,6 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
 
   const formatCurrency = (val: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
-
-  // Ranking real: soma os votos de cada candidato cadastrado, no estado ou na cidade escolhida
-  const [anoRanking, setAnoRanking] = useState(2026);
-  const anosComVotos = useMemo(() => {
-    const presentes = new Set<number>();
-    dados.forEach((c) =>
-      Object.values(c.historicoCandidatos || {}).forEach((porAno) =>
-        Object.entries(porAno).forEach(([ano, v]) => {
-          if (v) presentes.add(Number(ano));
-        })
-      )
-    );
-    return [...presentes].sort((a, b) => b - a);
-  }, [dados]);
-
-  const ranking = useMemo(() => {
-    const soma = new Map<string, number>();
-    const fonte = cidadeAtiva ? [cidadeAtiva] : dados;
-    fonte.forEach((c) =>
-      Object.entries(c.historicoCandidatos || {}).forEach(([nome, porAno]) => {
-        const v = porAno[anoRanking];
-        if (v) soma.set(nome, (soma.get(nome) || 0) + v);
-      })
-    );
-    return [...soma.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  }, [dados, cidadeAtiva, anoRanking]);
-  const totalRanking = ranking.reduce((acc, [, v]) => acc + v, 0);
 
   const semDados = carregando && dados.length === 0;
   const valorKpi = (cidade: number, geral: number) =>
@@ -312,64 +292,32 @@ export function PainelBI({ onVoltarMapa }: { onVoltarMapa: () => void }) {
         </div>
       </div>
 
-      {/* RANKING DOS CANDIDATOS CADASTRADOS */}
-      <div className="painel">
-        <div className="ranking__cab">
-          <div>
-            <h3 style={{ color: 'var(--blue-l)', margin: 0 }}>
-              {cidadeAtiva ? `Mais votados em ${cidadeAtiva.municipio}` : 'Mais votados no estado'}
-            </h3>
-            <p className="ranking__nota">Entre os candidatos cadastrados no sistema. O percentual é a fatia de cada um na soma da lista.</p>
+      {/* RESULTADO OFICIAL DE 2026 (TSE) */}
+      {cidadeAtiva ? (
+        <div className="bi__grade bi__grade--tse">
+          <div className="painel">
+            <h3>Ranking 2026 em {cidadeAtiva.municipio}</h3>
+            <RankingCidade key={cidadeAtiva.codigoIbge} ibge={cidadeAtiva.codigoIbge} nome={cidadeAtiva.municipio} />
           </div>
-          {anosComVotos.length > 0 && (
-            <div className="anos ranking__anos" role="group" aria-label="Ano do ranking">
-              {anosComVotos.map((ano) => (
-                <button
-                  key={ano}
-                  className={`ano ${anoRanking === ano ? 'is-ativo' : ''}`}
-                  aria-pressed={anoRanking === ano}
-                  onClick={() => setAnoRanking(ano)}
-                >
-                  {ano}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="painel">
+            <h3>Voto por zona eleitoral</h3>
+            <ZonasCidade ibge={cidadeAtiva.codigoIbge} nome={cidadeAtiva.municipio} />
+            <h3 style={{ marginTop: 22 }}>Aliados para 2030</h3>
+            <AliadosCidade ibge={cidadeAtiva.codigoIbge} municipioId={cidadeAtiva.id} nome={cidadeAtiva.municipio} />
+          </div>
         </div>
-
-        {semDados ? (
-          <div className="esqueleto" style={{ height: '140px' }} />
-        ) : ranking.length === 0 ? (
-          <p className="texto-vazio">
-            {cidadeAtiva
-              ? `Nenhum voto registrado em ${anoRanking} para ${cidadeAtiva.municipio}. Escolha outro ano.`
-              : `Nenhum voto registrado em ${anoRanking}. Escolha outro ano.`}
-          </p>
-        ) : (
-          <ol className="ranking">
-            {ranking.map(([nome, votos], i) => {
-              const ehJefferson = nome.toUpperCase().includes('JEFFERSON CAMPOS');
-              return (
-                <li key={nome} className={`ranking__item ${ehJefferson ? 'is-jc' : ''}`}>
-                  <span className="ranking__pos num">{i + 1}º</span>
-                  <div className="ranking__info">
-                    <div className="ranking__linha">
-                      <strong>{nome}</strong>
-                      <span className="num">
-                        {votos.toLocaleString('pt-BR')} votos
-                        <small> ({((votos / (totalRanking || 1)) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%)</small>
-                      </span>
-                    </div>
-                    <div className="barra">
-                      <div style={{ width: `${(votos / (ranking[0][1] || 1)) * 100}%` }} />
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </div>
+      ) : (
+        <div className="bi__grade bi__grade--tse">
+          <div className="painel">
+            <h3>Concorrência dentro do PL</h3>
+            <ConcorrenciaPartido />
+          </div>
+          <div className="painel">
+            <h3>Aliados para 2030</h3>
+            <AliadosEstado />
+          </div>
+        </div>
+      )}
 
       {modalZonasAberto && cidadeAtiva && (
         <ModalZonas municipio={cidadeAtiva.municipio} zonas={cidadeAtiva.eleitorado.zonas} onClose={() => setModalZonasAberto(false)} />

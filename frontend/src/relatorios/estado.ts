@@ -1,9 +1,10 @@
 import { ANOS_ELEICAO, ANO_BASE, ANO_META, projecao, votosJefNoAno, type Municipio } from '../tipos';
 import { COR, CORES_SERIE, Relatorio, fmtInt, fmtMoeda, fmtMoedaCurta, fmtPct, fmtSinal, type RGB } from './base';
+import { secaoAliadosEstado, secaoConcorrenciaEstado, notaFonte, type TseEstado } from './tse';
 import { ANO_ANTERIOR, penetracao, resumoEstado, textoArea, textoPrioridade, variacao } from './analise';
 
 /* Relatório estratégico do estado inteiro, com metas para 2030 */
-export function gerarRelatorioEstado(todos: Municipio[]) {
+export function gerarRelatorioEstado(todos: Municipio[], tse?: TseEstado | null) {
   const e = resumoEstado(todos, ANO_BASE);
   const crescimento = todos.length ? projecao(todos[0]).crescimentoMetaPct ?? 20 : 20;
   const difEstado = e.votos - e.votosAnterior;
@@ -133,6 +134,11 @@ export function gerarRelatorioEstado(todos: Municipio[]) {
     [...comparaveis].sort((a, b) => b.v.dif - a.v.dif).filter((x) => x.v.dif > 0).slice(0, 12)
   );
 
+  if (tse) {
+    secaoConcorrenciaEstado(r, tse);
+    secaoAliadosEstado(r, tse);
+  }
+
   r.secao('Oportunidades: grandes eleitorados com pouca presença', `Municípios com mais de 50 mil eleitores e penetração abaixo de 1% em ${ANO_BASE}, do maior para o menor eleitorado.`);
   const oportunidades = todos
     .filter((c) => c.eleitorado.totalEleitores > 50000 && (penetracao(c) ?? 0) < 1)
@@ -184,5 +190,6 @@ export function gerarRelatorioEstado(todos: Municipio[]) {
     `Fontes: resultados eleitorais e emendas cadastrados na API Cidadania 360; eleitorado por zona do TSE (${ANO_BASE}). A meta de ${ANO_META} soma, cidade por cidade, ${crescimento}% de crescimento sobre os votos de ${ANO_BASE}. Penetração = votos ÷ eleitorado de ${ANO_BASE}.`
   );
 
+  if (tse) notaFonte(r);
   r.salvar(`Relatorio_Estrategico_${ANO_META}_Estado_SP.pdf`);
 }
