@@ -77,8 +77,6 @@ model Municipality {
   latitude    Float?
   longitude   Float?
   
-  geometry    Unsupported("geometry(MultiPolygon, 4326)")? 
-
   importedAt  DateTime @default(now()) @map("imported_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   source      String   @default("IBGE")

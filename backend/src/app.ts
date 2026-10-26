@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import municipiosRoutes from './modules/municipios/municipios.routes.js';
 import votacaoRoutes from './modules/votacao/votacao.routes.js';
+import { statusMigracao } from './modules/migracao/migracao.js';
 import { LeadershipsService, limparDados, validar, type DadosLideranca } from './modules/leaderships/leaderships.service.js';
 
 const app = express();
@@ -31,39 +32,9 @@ app.get('/api/v1/health', (req: Request, res: Response) => {
   });
 });
 
-// TESTE PROVISÓRIO: verifica se o PostgreSQL da Locaweb aceita conexão vinda do Render.
-// Não usa usuário nem senha: só abre a porta e pergunta se o servidor aceita SSL.
-app.get('/api/v1/diagnostico/locaweb', async (_req: Request, res: Response) => {
-  const host = 'appcrmpolitico.postgresql.dbaas.com.br';
-  const porta = 5432;
-  const { lookup } = await import('node:dns/promises');
-  const net = await import('node:net');
-  const resultado: Record<string, unknown> = { host, porta };
-  try {
-    resultado.ips = (await lookup(host, { all: true })).map((a) => a.address);
-  } catch (e) {
-    resultado.dns = `falhou: ${(e as Error).message}`;
-    return res.json(resultado);
-  }
-  const inicio = Date.now();
-  resultado.conexao = await new Promise<string>((ok) => {
-    const s = net.createConnection({ host, port: porta });
-    const fim = (txt: string) => { s.destroy(); ok(txt); };
-    s.setTimeout(10000, () => fim('tempo esgotado (porta bloqueada para acesso externo)'));
-    s.on('error', (e) => fim(`erro: ${e.message}`));
-    s.on('connect', () => {
-      const req = Buffer.alloc(8);
-      req.writeInt32BE(8, 0);
-      req.writeInt32BE(80877103, 4); // pedido de SSL do protocolo PostgreSQL
-      s.write(req);
-    });
-    s.once('data', (d: Buffer) => {
-      const c = String.fromCharCode(d[0]);
-      fim(c === 'S' ? 'aberta, PostgreSQL respondeu e aceita SSL' : c === 'N' ? 'aberta, PostgreSQL respondeu sem SSL' : `aberta, resposta inesperada (${c})`);
-    });
-  });
-  resultado.ms = Date.now() - inicio;
-  res.json(resultado);
+// Andamento da cópia do banco para a Locaweb (só contagens, nenhum dado)
+app.get('/api/v1/diagnostico/migracao', (_req: Request, res: Response) => {
+  res.json(statusMigracao());
 });
 
 // Rotas de Municípios
