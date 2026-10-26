@@ -57,7 +57,7 @@ app.get('/api/v1/diagnostico/locaweb', async (_req: Request, res: Response) => {
       req.writeInt32BE(80877103, 4); // pedido de SSL do protocolo PostgreSQL
       s.write(req);
     });
-    s.once('data', (d) => {
+    s.once('data', (d: Buffer) => {
       const c = String.fromCharCode(d[0]);
       fim(c === 'S' ? 'aberta, PostgreSQL respondeu e aceita SSL' : c === 'N' ? 'aberta, PostgreSQL respondeu sem SSL' : `aberta, resposta inesperada (${c})`);
     });
